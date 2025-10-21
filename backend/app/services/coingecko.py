@@ -64,7 +64,7 @@ class CoinGeckoService:
             return {
                 "success": True,
                 "data": {
-                    "id": data["id"],
+                    "token_id": data["id"],  # Changed from "id" to "token_id"
                     "symbol": data["symbol"],
                     "name": data["name"],
                     "current_price": market_data.get("current_price", {}).get("usd", 0),
@@ -114,7 +114,14 @@ class CoinGeckoService:
             
             # Filter coins that exist on the specified platform
             network_tokens = [
-                coin for coin in all_coins 
+                {
+                    "id": coin["id"],
+                    "symbol": coin["symbol"],
+                    "name": coin["name"],
+                    "platforms": coin.get("platforms", {}),
+                    "image": None  # The list endpoint doesn't provide images
+                }
+                for coin in all_coins 
                 if coin.get("platforms", {}).get(platform_id)
             ]
             
@@ -122,7 +129,79 @@ class CoinGeckoService:
                 "success": True,
                 "data": {
                     "network": network,
-                    "tokens": network_tokens[:100]  # Limit to first 100 for performance
+                    "tokens": network_tokens[:50]  # Limit to first 50 for performance
+                }
+            }
+        except httpx.HTTPError as e:
+            return {
+                "success": False,
+                "error": f"HTTP error: {str(e)}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}"
+            }
+
+    async def get_network_tokens_with_images(self, network: str) -> Dict[str, Any]:
+        """Fetch tokens for a specific network with images (uses market data)"""
+        try:
+            # Map network names to category IDs for market data
+            category_map = {
+                "ethereum": "ethereum-ecosystem",
+                "binance-smart-chain": "binance-smart-chain",
+                "tron": "tron-ecosystem",
+                "filecoin": "filecoin-ecosystem"
+            }
+            
+            category_id = category_map.get(network.lower())
+            if not category_id:
+                return {
+                    "success": False,
+                    "error": f"Unsupported network: {network}"
+                }
+            
+            # Use market data endpoint which includes images
+            url = f"{self.base_url}/coins/markets"
+            params = {
+                "vs_currency": "usd",
+                "category": category_id,
+                "order": "market_cap_desc",
+                "per_page": 50,  # Limit for performance
+                "page": 1,
+                "sparkline": False
+            }
+            
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
+            
+            market_data = response.json()
+            
+            # Map platform IDs
+            platform_map = {
+                "ethereum": "ethereum",
+                "binance-smart-chain": "binance-smart-chain",
+                "tron": "tron",
+                "filecoin": "filecoin"
+            }
+            platform_id = platform_map.get(network.lower(), network.lower())
+            
+            network_tokens = [
+                {
+                    "id": coin["id"],
+                    "symbol": coin["symbol"],
+                    "name": coin["name"],
+                    "platforms": {platform_id: "native"},  # Simplified for market data
+                    "image": coin.get("image", "")
+                }
+                for coin in market_data
+            ]
+            
+            return {
+                "success": True,
+                "data": {
+                    "network": network,
+                    "tokens": network_tokens
                 }
             }
         except httpx.HTTPError as e:

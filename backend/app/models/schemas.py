@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
 class CoinPrice(BaseModel):
@@ -16,15 +16,15 @@ class TokenInfo(BaseModel):
     symbol: str
     name: str
     platforms: Dict[str, Optional[str]]
-    image: str
+    image: Optional[str] = None  # Make image optional
 
 class TokenPrice(BaseModel):
     token_id: str
     symbol: str
     name: str
     current_price: float
-    price_change_24h: Optional[float]
-    price_change_percentage_24h: Optional[float]
+    price_change_24h: Optional[float] = None
+    price_change_percentage_24h: Optional[float] = None
     image: str
 
 class NetworkTokens(BaseModel):
