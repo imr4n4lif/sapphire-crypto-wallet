@@ -1,7 +1,7 @@
-from pydantic_settings import BaseSettings
+from pydantic import BaseModel
 from typing import List
 
-class Settings(BaseSettings):
+class Settings(BaseModel):
     APP_NAME: str = "Sapphire Wallet API"
     DEBUG: bool = False
     
@@ -13,8 +13,5 @@ class Settings(BaseSettings):
     
     # Cache settings
     CACHE_TTL: int = 300  # 5 minutes
-    
-    class Config:
-        env_file = ".env"
 
 settings = Settings()
