@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/wallet_models.dart';
+import '../models/wallet_model.dart';
 import '../providers/wallet_provider.dart';
 
 class CoinDetailPage extends StatefulWidget {

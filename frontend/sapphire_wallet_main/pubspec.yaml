@@ -1,8 +1,6 @@
-name: crypto_wallet
-description: A non-custodial crypto wallet
-
+name: sapphire_wallet_main
+description: A production-grade Flutter crypto wallet
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -11,21 +9,75 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
-  shared_preferences: ^2.2.2
-  qr_flutter: ^4.1.0
-  flutter_svg: ^2.0.9
-  http: ^1.1.0
+
+  # State Management
   provider: ^6.1.1
 
-  shimmer: ^2.0.0
+  # Crypto & Blockchain
+  web3dart: ^2.7.3
+  bip39: ^1.0.6
+  bip32: ^2.0.0
+  hex: ^0.2.0
+  #bitcoin_flutter: ^2.0.2
+  pointycastle: ^3.7.3
+
+  # HTTP & API
+  http: ^1.2.0
+  dio: ^5.4.0
+
+  # Storage
+  shared_preferences: ^2.2.2
+  flutter_secure_storage: ^9.0.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # UI Components
+  qr_flutter: ^4.1.0
+  qr_code_scanner: ^1.0.1
+  shimmer: ^3.0.0
+  flutter_svg: ^2.0.9
+  cached_network_image: ^3.3.1
+
+  # Charts
+  fl_chart: ^0.66.0
+  syncfusion_flutter_charts: ^24.2.9
+
+  # Security
+  local_auth: ^2.1.8
+  encrypt: ^5.0.3
+
+  # Notifications
+  flutter_local_notifications: ^16.3.2
+  firebase_messaging: ^14.7.15
+
+  # Utils
+  intl: ^0.19.0
+  url_launcher: ^6.2.4
+  share_plus: ^7.2.2
+  clipboard: ^0.1.3
+  uuid: ^4.3.3
+  equatable: ^2.0.5
+
+  # Icons
+  cupertino_icons: ^1.0.6
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
+  flutter_lints: ^3.0.1
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
 
 flutter:
   uses-material-design: true
+
   assets:
     - assets/svg/
+    - assets/images/
+
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: fonts/Roboto-Regular.ttf
+        - asset: fonts/Roboto-Bold.ttf
+          weight: 700

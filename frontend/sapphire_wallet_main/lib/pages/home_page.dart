@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shimmer/shimmer.dart';
-import '../models/wallet_models.dart';
+import '../models/wallet_model.dart';
 import '../providers/wallet_provider.dart';
 import '../providers/theme_provider.dart';
 import 'coin_detail_page.dart';

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:provider/provider.dart';
-import '../models/wallet_models.dart';
+import '../models/wallet_model.dart';
 import '../providers/wallet_provider.dart';
 
 class ReceivePage extends StatefulWidget {
