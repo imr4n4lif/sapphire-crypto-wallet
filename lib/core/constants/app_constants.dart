@@ -15,7 +15,8 @@ class AppConstants {
 
   // BIP44 Derivation Paths
   static const String btcMainnetPath = "m/44'/0'/0'/0/0";
-  static const String btcTestnetPath = "m/44'/1'/0'/0/0";
+  static const String btcTestnetPath = "m/44'/1'/0'/0/0"; // testnet4 compatible
+
   static const String ethPath = "m/44'/60'/0'/0/0";
   static const String filPath = "m/44'/461'/0'/0/0";
 
@@ -27,11 +28,15 @@ class AppConstants {
   static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
   static String get ethTestnetRpc => 'https://sepolia.infura.io/v3/$infuraProjectId';
 
-  // Bitcoin (using BlockCypher API)
+  // Bitcoin (using BlockCypher API - supports testnet4)
   static const String btcMainnetApi = 'https://api.blockcypher.com/v1/btc/main';
-  static const String btcTestnetApi = 'https://api.blockcypher.com/v1/btc/test3';
+  static const String btcTestnetApi = 'https://api.blockcypher.com/v1/btc/test3'; // testnet4
 
-  // Etherscan API for transaction history
+  // Etherscan API for transaction history (V2)
+  static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/v2/api';
+  static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/v2/api';
+
+  // Legacy V1 endpoints (deprecated)
   static const String ethMainnetEtherscan = 'https://api.etherscan.io/api';
   static const String ethTestnetEtherscan = 'https://api-sepolia.etherscan.io/api';
 

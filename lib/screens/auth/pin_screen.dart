@@ -24,6 +24,18 @@ class _PinScreenState extends State<PinScreen> {
   String _confirmPin = '';
   bool _isConfirming = false;
   String _error = '';
+  bool _hasTriedBiometric = false; // Track if we've already tried biometric
+
+  @override
+  void initState() {
+    super.initState();
+    // FIXED: Try biometric authentication automatically when entering verify mode
+    if (widget.mode == PinScreenMode.verify) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _tryBiometricAuth();
+      });
+    }
+  }
 
   String get _title {
     if (widget.mode == PinScreenMode.create) {
@@ -32,6 +44,55 @@ class _PinScreenState extends State<PinScreen> {
       return 'Enter New PIN';
     }
     return 'Enter PIN';
+  }
+
+  // FIXED: Automatic biometric authentication with debug logging
+  Future<void> _tryBiometricAuth() async {
+    if (_hasTriedBiometric) {
+      print('🔐 Already tried biometric auth, skipping');
+      return;
+    }
+    _hasTriedBiometric = true;
+
+    final authProvider = context.read<AuthProvider>();
+
+    print('🔐 Biometric Status:');
+    print('  - Available: ${authProvider.biometricAvailable}');
+    print('  - Enabled: ${authProvider.biometricEnabled}');
+    print('  - Type: ${authProvider.biometricType}');
+
+    // Only try if biometric is enabled and available
+    if (!authProvider.biometricEnabled) {
+      print('⚠️ Biometric not enabled in settings');
+      return;
+    }
+
+    if (!authProvider.biometricAvailable) {
+      print('⚠️ Biometric not available on device');
+      return;
+    }
+
+    // Small delay to let the screen render
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    if (!mounted) return;
+
+    print('🔐 Attempting biometric authentication...');
+    final authenticated = await authProvider.authenticateWithBiometric();
+    print('🔐 Biometric result: $authenticated');
+
+    if (authenticated && mounted) {
+      print('✅ Biometric authentication successful');
+      if (widget.onSuccess != null) {
+        widget.onSuccess!();
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      }
+    } else {
+      print('❌ Biometric authentication failed or cancelled');
+    }
   }
 
   void _onNumberTap(String number) {

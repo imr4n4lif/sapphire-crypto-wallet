@@ -20,10 +20,14 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshData();
+    // FIXED: Use addPostFrameCallback to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshData();
+    });
   }
 
   Future<void> _refreshData() async {
+    if (!mounted) return;
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
   }

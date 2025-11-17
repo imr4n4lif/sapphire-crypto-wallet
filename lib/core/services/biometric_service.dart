@@ -11,8 +11,11 @@ class BiometricService {
   // Check if device supports biometric authentication
   Future<bool> canCheckBiometrics() async {
     try {
-      return await _localAuth.canCheckBiometrics;
-    } on PlatformException {
+      final canCheck = await _localAuth.canCheckBiometrics;
+      print('🔐 canCheckBiometrics: $canCheck');
+      return canCheck;
+    } on PlatformException catch (e) {
+      print('❌ canCheckBiometrics error: $e');
       return false;
     }
   }
@@ -20,8 +23,11 @@ class BiometricService {
   // Check if device has biometrics enrolled
   Future<bool> isDeviceSupported() async {
     try {
-      return await _localAuth.isDeviceSupported();
-    } on PlatformException {
+      final isSupported = await _localAuth.isDeviceSupported();
+      print('🔐 isDeviceSupported: $isSupported');
+      return isSupported;
+    } on PlatformException catch (e) {
+      print('❌ isDeviceSupported error: $e');
       return false;
     }
   }
@@ -29,8 +35,11 @@ class BiometricService {
   // Get available biometrics
   Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
-      return await _localAuth.getAvailableBiometrics();
-    } on PlatformException {
+      final biometrics = await _localAuth.getAvailableBiometrics();
+      print('🔐 Available biometrics: $biometrics');
+      return biometrics;
+    } on PlatformException catch (e) {
+      print('❌ getAvailableBiometrics error: $e');
       return <BiometricType>[];
     }
   }
@@ -40,23 +49,50 @@ class BiometricService {
     String reason = 'Please authenticate to access your wallet',
   }) async {
     try {
+      print('🔐 Starting biometric authentication...');
+
       final bool canAuthenticateWithBiometrics = await canCheckBiometrics();
       final bool canAuthenticate = canAuthenticateWithBiometrics ||
           await _localAuth.isDeviceSupported();
 
+      print('🔐 Can authenticate: $canAuthenticate');
+
       if (!canAuthenticate) {
+        print('⚠️ Device cannot authenticate with biometrics');
         return false;
       }
 
-      return await _localAuth.authenticate(
+      final availableBiometrics = await getAvailableBiometrics();
+      print('🔐 Available biometric types: $availableBiometrics');
+
+      if (availableBiometrics.isEmpty) {
+        print('⚠️ No biometrics enrolled on device');
+        return false;
+      }
+
+      print('🔐 Calling authenticate() with reason: $reason');
+      final result = await _localAuth.authenticate(
         localizedReason: reason,
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: true,
+          biometricOnly: false, // Allow PIN fallback
         ),
       );
+
+      print('🔐 Authentication result: $result');
+      return result;
     } on PlatformException catch (e) {
-      print('Biometric authentication error: $e');
+      print('❌ Biometric authentication error: ${e.code} - ${e.message}');
+      if (e.code == 'NotAvailable') {
+        print('ℹ️ Biometric authentication not available');
+      } else if (e.code == 'NotEnrolled') {
+        print('ℹ️ No biometrics enrolled');
+      } else if (e.code == 'LockedOut') {
+        print('ℹ️ Biometric authentication locked out');
+      }
+      return false;
+    } catch (e) {
+      print('❌ Unexpected biometric error: $e');
       return false;
     }
   }
@@ -65,8 +101,8 @@ class BiometricService {
   Future<void> stopAuthentication() async {
     try {
       await _localAuth.stopAuthentication();
-    } on PlatformException {
-      // Handle error
+    } on PlatformException catch (e) {
+      print('⚠️ Stop authentication error: $e');
     }
   }
 

@@ -77,6 +77,7 @@ class Transaction {
     required this.isIncoming,
   });
 
+  // V1 API Parser (for Bitcoin and legacy Ethereum)
   factory Transaction.fromJson(Map<String, dynamic> json, CoinType coinType, String myAddress) {
     try {
       // Bitcoin transaction parsing
@@ -135,7 +136,7 @@ class Transaction {
         );
       }
 
-      // Ethereum transaction parsing (if implemented with Etherscan API)
+      // Ethereum transaction parsing (V1 API)
       return Transaction(
         hash: json['hash'] ?? json['txid'] ?? '',
         coinType: coinType,
@@ -150,6 +151,75 @@ class Transaction {
       );
     } catch (e) {
       print('❌ Error parsing transaction: $e');
+      rethrow;
+    }
+  }
+
+  // V2 API Parser (for Ethereum Etherscan V2)
+  factory Transaction.fromJsonV2(Map<String, dynamic> json, CoinType coinType, String myAddress) {
+    try {
+      // V2 API structure is different
+      // Example: {hash, from, to, value, timestamp, gas_used, gas_price, ...}
+
+      final hash = json['hash']?.toString() ?? '';
+      final from = json['from']?.toString() ?? '';
+      final to = json['to']?.toString() ?? '';
+
+      // Parse value (in wei)
+      final valueStr = json['value']?.toString() ?? '0';
+      final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
+      final amount = valueBigInt / BigInt.from(10).pow(18);
+
+      // Parse timestamp
+      final timestampStr = json['timestamp']?.toString() ?? '';
+      DateTime timestamp;
+      try {
+        if (timestampStr.contains('-')) {
+          // ISO format: "2024-01-01T12:00:00Z"
+          timestamp = DateTime.parse(timestampStr);
+        } else {
+          // Unix timestamp
+          final ts = int.tryParse(timestampStr) ?? 0;
+          timestamp = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+        }
+      } catch (e) {
+        timestamp = DateTime.now();
+      }
+
+      // Parse confirmations (if available)
+      final confirmations = int.tryParse(json['confirmations']?.toString() ?? '0') ?? 0;
+
+      // Calculate gas fee
+      double fee = 0.0;
+      try {
+        final gasUsedStr = json['gas_used']?.toString() ?? '0';
+        final gasPriceStr = json['gas_price']?.toString() ?? '0';
+
+        final gasUsed = BigInt.tryParse(gasUsedStr) ?? BigInt.zero;
+        final gasPrice = BigInt.tryParse(gasPriceStr) ?? BigInt.zero;
+
+        final feeBigInt = gasUsed * gasPrice;
+        fee = feeBigInt / BigInt.from(10).pow(18);
+      } catch (e) {
+        print('⚠️ Error calculating fee: $e');
+      }
+
+      final isIncoming = to.toLowerCase() == myAddress.toLowerCase();
+
+      return Transaction(
+        hash: hash,
+        coinType: coinType,
+        from: from,
+        to: to,
+        amount: amount.toDouble(),
+        timestamp: timestamp,
+        confirmations: confirmations,
+        fee: fee,
+        status: _getStatus(confirmations, coinType),
+        isIncoming: isIncoming,
+      );
+    } catch (e) {
+      print('❌ Error parsing V2 transaction: $e');
       rethrow;
     }
   }

@@ -18,12 +18,28 @@ class AuthProvider with ChangeNotifier {
   String get biometricType => _biometricType;
 
   Future<void> initialize() async {
-    _biometricAvailable = await _biometric.canCheckBiometrics() &&
-        await _biometric.isDeviceSupported();
+    print('🔐 Initializing AuthProvider...');
+
+    // Check if biometric is available
+    final canCheck = await _biometric.canCheckBiometrics();
+    final isSupported = await _biometric.isDeviceSupported();
+    _biometricAvailable = canCheck && isSupported;
+
+    print('🔐 Biometric available: $_biometricAvailable (canCheck: $canCheck, isSupported: $isSupported)');
+
+    // Check if biometric is enabled in settings
     _biometricEnabled = await _storage.readBool(AppConstants.keyBiometricEnabled);
+    print('🔐 Biometric enabled in settings: $_biometricEnabled');
 
     if (_biometricAvailable) {
       _biometricType = await _biometric.getBiometricTypeString();
+      print('🔐 Biometric type: $_biometricType');
+
+      // List available biometrics for debugging
+      final available = await _biometric.getAvailableBiometrics();
+      print('🔐 Available biometric types: $available');
+    } else {
+      print('⚠️ Biometric not available on this device');
     }
 
     notifyListeners();
@@ -31,16 +47,22 @@ class AuthProvider with ChangeNotifier {
 
   Future<bool> hasPin() async {
     final pin = await _storage.readSecure('pin_hash');
-    return pin != null;
+    final hasPin = pin != null;
+    print('🔐 Has PIN: $hasPin');
+    return hasPin;
   }
 
   Future<void> setPin(String pin) async {
+    print('🔐 Setting new PIN...');
     await _storage.savePin(pin);
     notifyListeners();
   }
 
   Future<bool> verifyPin(String pin) async {
+    print('🔐 Verifying PIN...');
     final isValid = await _storage.verifyPin(pin);
+    print('🔐 PIN valid: $isValid');
+
     if (isValid) {
       _isAuthenticated = true;
       notifyListeners();
@@ -49,11 +71,27 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<bool> authenticateWithBiometric() async {
-    if (!_biometricAvailable || !_biometricEnabled) {
+    print('🔐 authenticateWithBiometric called');
+    print('🔐 - Available: $_biometricAvailable');
+    print('🔐 - Enabled: $_biometricEnabled');
+
+    if (!_biometricAvailable) {
+      print('⚠️ Biometric not available, cannot authenticate');
       return false;
     }
 
-    final authenticated = await _biometric.authenticate();
+    if (!_biometricEnabled) {
+      print('⚠️ Biometric not enabled in settings, cannot authenticate');
+      return false;
+    }
+
+    print('🔐 Calling BiometricService.authenticate()...');
+    final authenticated = await _biometric.authenticate(
+        reason: 'Please authenticate to access your wallet'
+    );
+
+    print('🔐 Biometric authentication result: $authenticated');
+
     if (authenticated) {
       _isAuthenticated = true;
       notifyListeners();
@@ -62,21 +100,25 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> setBiometricEnabled(bool enabled) async {
+    print('🔐 Setting biometric enabled: $enabled');
     _biometricEnabled = enabled;
     await _storage.saveBool(AppConstants.keyBiometricEnabled, enabled);
     notifyListeners();
   }
 
   void logout() {
+    print('🔐 Logging out...');
     _isAuthenticated = false;
     notifyListeners();
   }
 
   Future<void> changePin(String oldPin, String newPin) async {
+    print('🔐 Changing PIN...');
     final isValid = await _storage.verifyPin(oldPin);
     if (!isValid) {
       throw Exception('Invalid current PIN');
     }
     await _storage.savePin(newPin);
+    print('✅ PIN changed successfully');
   }
 }

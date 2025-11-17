@@ -8,13 +8,11 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
-    <!-- For Android 13+ notifications -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-
     <application
         android:label="Sapphire Wallet"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"
@@ -24,7 +22,8 @@
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
-            android:showWhenLocked="true">
+            android:showWhenLocked="true"
+            android:enableOnBackInvokedCallback="true">
 
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
@@ -45,7 +44,7 @@
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@mipmap/ic_launcher" />
 
-        <!-- Notification Channel (for Android 8.0+) -->
+        <!-- Notification Receivers -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="false" />

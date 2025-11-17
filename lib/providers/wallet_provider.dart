@@ -23,7 +23,6 @@ class WalletProvider with ChangeNotifier {
   Map<CoinType, List<Transaction>> _transactions = {};
 
   Timer? _autoRefreshTimer;
-  // Increased interval to avoid rate limiting
   static const Duration _refreshInterval = Duration(minutes: 5);
 
   WalletData? get wallet => _wallet;
@@ -34,10 +33,11 @@ class WalletProvider with ChangeNotifier {
   Map<CoinType, List<Transaction>> get transactions => _transactions;
 
   double get totalPortfolioValue {
-    return _balances.values.fold(0.0, (sum, balance) => sum + balance.usdValue);
+    final total = _balances.values.fold(0.0, (sum, balance) => sum + balance.usdValue);
+    print('💰 Total portfolio value: \$$total');
+    return total;
   }
 
-  // Initialize wallet
   Future<void> initialize() async {
     _isLoading = true;
     notifyListeners();
@@ -45,11 +45,9 @@ class WalletProvider with ChangeNotifier {
     try {
       print('🔄 Initializing wallet provider...');
 
-      // Load network preference
       _isMainnet = await _storage.readBool(AppConstants.keyIsMainnet, defaultValue: true);
       _blockchainService.initialize(_isMainnet);
 
-      // Load wallet if exists
       final mnemonic = await _storage.readSecure(AppConstants.keyMnemonic);
       if (mnemonic != null) {
         print('✅ Wallet found, loading...');
@@ -57,7 +55,6 @@ class WalletProvider with ChangeNotifier {
         await refreshBalances();
         await refreshTransactions();
 
-        // Start auto-refresh timer
         _startAutoRefresh();
       } else {
         print('ℹ️ No wallet found');
@@ -70,7 +67,6 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Start auto-refresh timer
   void _startAutoRefresh() {
     _stopAutoRefresh();
 
@@ -86,13 +82,11 @@ class WalletProvider with ChangeNotifier {
     });
   }
 
-  // Stop auto-refresh timer
   void _stopAutoRefresh() {
     _autoRefreshTimer?.cancel();
     _autoRefreshTimer = null;
   }
 
-  // Create new wallet
   Future<String> createWallet() async {
     _isLoading = true;
     notifyListeners();
@@ -122,7 +116,6 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Import wallet from mnemonic
   Future<void> importWallet(String mnemonic) async {
     _isLoading = true;
     notifyListeners();
@@ -156,7 +149,6 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Delete wallet
   Future<void> deleteWallet() async {
     print('🗑️ Deleting wallet...');
 
@@ -173,7 +165,6 @@ class WalletProvider with ChangeNotifier {
     print('✅ Wallet deleted');
   }
 
-  // Toggle network
   Future<void> toggleNetwork() async {
     print('🔄 Toggling network...');
 
@@ -196,7 +187,6 @@ class WalletProvider with ChangeNotifier {
     print('✅ Switched to ${_isMainnet ? "Mainnet" : "Testnet"}');
   }
 
-  // Refresh all balances
   Future<void> refreshBalances() async {
     if (_wallet == null) {
       print('⚠️ No wallet to refresh');
@@ -214,10 +204,21 @@ class WalletProvider with ChangeNotifier {
     try {
       print('🔄 Refreshing balances...');
 
-      // Fetch prices first (no rate limit)
+      // Fetch prices first
+      print('💲 Fetching crypto prices...');
       final prices = await _priceService.fetchAllPrices();
 
-      // Fetch balances with delays between calls
+      // Debug price fetching
+      for (final coinType in CoinType.values) {
+        final price = prices[coinType];
+        if (price != null) {
+          print('💲 ${coinType.name.toUpperCase()}: \$${price.price.toStringAsFixed(2)} (${price.change24h >= 0 ? '+' : ''}${price.change24h.toStringAsFixed(2)}%)');
+        } else {
+          print('⚠️ Failed to fetch price for ${coinType.name.toUpperCase()}');
+        }
+      }
+
+      // Fetch balances with delays
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -226,27 +227,41 @@ class WalletProvider with ChangeNotifier {
 
       final filBalance = await _blockchainService.getFilecoinBalance(_wallet!.filAddress);
 
+      // Calculate USD values
+      final btcPrice = prices[CoinType.btc]?.price ?? 0.0;
+      final ethPrice = prices[CoinType.eth]?.price ?? 0.0;
+      final filPrice = prices[CoinType.fil]?.price ?? 0.0;
+
+      final btcUsd = btcBalance * btcPrice;
+      final ethUsd = ethBalance * ethPrice;
+      final filUsd = filBalance * filPrice;
+
+      print('💰 Balance calculation:');
+      print('   BTC: $btcBalance × \$$btcPrice = \$$btcUsd');
+      print('   ETH: $ethBalance × \$$ethPrice = \$$ethUsd');
+      print('   FIL: $filBalance × \$$filPrice = \$$filUsd');
+
       // Update balances
       _balances = {
         CoinType.btc: CoinBalance(
           coinType: CoinType.btc,
           balance: btcBalance,
-          pricePerCoin: prices[CoinType.btc]?.price ?? 0.0,
-          usdValue: btcBalance * (prices[CoinType.btc]?.price ?? 0.0),
+          pricePerCoin: btcPrice,
+          usdValue: btcUsd,
           change24h: prices[CoinType.btc]?.change24h ?? 0.0,
         ),
         CoinType.eth: CoinBalance(
           coinType: CoinType.eth,
           balance: ethBalance,
-          pricePerCoin: prices[CoinType.eth]?.price ?? 0.0,
-          usdValue: ethBalance * (prices[CoinType.eth]?.price ?? 0.0),
+          pricePerCoin: ethPrice,
+          usdValue: ethUsd,
           change24h: prices[CoinType.eth]?.change24h ?? 0.0,
         ),
         CoinType.fil: CoinBalance(
           coinType: CoinType.fil,
           balance: filBalance,
-          pricePerCoin: prices[CoinType.fil]?.price ?? 0.0,
-          usdValue: filBalance * (prices[CoinType.fil]?.price ?? 0.0),
+          pricePerCoin: filPrice,
+          usdValue: filUsd,
           change24h: prices[CoinType.fil]?.change24h ?? 0.0,
         ),
       };
@@ -260,7 +275,6 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Refresh transactions
   Future<void> refreshTransactions() async {
     if (_wallet == null) {
       print('⚠️ No wallet to refresh transactions');
@@ -275,7 +289,6 @@ class WalletProvider with ChangeNotifier {
     try {
       print('🔄 Refreshing transactions...');
 
-      // Add delays between API calls
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
       await Future.delayed(const Duration(milliseconds: 1000));
 
@@ -294,7 +307,6 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Send transaction
   Future<String> sendTransaction({
     required CoinType coinType,
     required String toAddress,
@@ -346,12 +358,10 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Get coin balance
   CoinBalance? getCoinBalance(CoinType coinType) {
     return _balances[coinType];
   }
 
-  // Get coin transactions
   List<Transaction> getCoinTransactions(CoinType coinType) {
     return _transactions[coinType] ?? [];
   }
