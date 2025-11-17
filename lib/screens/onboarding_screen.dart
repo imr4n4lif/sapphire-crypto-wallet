@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'wallet/create_wallet_screen.dart';
 import 'wallet/import_wallet_screen.dart';
 
@@ -14,14 +15,22 @@ class OnboardingScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(),
-              Icon(
-                Icons.account_balance_wallet_rounded,
-                size: 100,
-                color: Theme.of(context).colorScheme.primary,
+
+              // ---- SVG LOGO (Color from Theme) ----
+              SvgPicture.asset(
+                "assets/icons/logo.svg",
+                width: 110,
+                height: 110,
+                colorFilter: ColorFilter.mode(
+                  Theme.of(context).colorScheme.primary,
+                  BlendMode.srcIn,
+                ),
               ),
+
               const SizedBox(height: 30),
+
               Text(
-                'Welcome to Crypto Wallet',
+                'Welcome to Sapphire Wallet',
                 style: Theme.of(context).textTheme.displaySmall,
                 textAlign: TextAlign.center,
               ),
@@ -31,25 +40,29 @@ class OnboardingScreen extends StatelessWidget {
                 style: Theme.of(context).textTheme.bodyLarge,
                 textAlign: TextAlign.center,
               ),
+
               const Spacer(),
-              _FeatureCard(
+
+              const _FeatureCard(
                 icon: Icons.shield_outlined,
                 title: 'Fully Secure',
                 subtitle: 'Your keys, your crypto',
               ),
               const SizedBox(height: 16),
-              _FeatureCard(
+              const _FeatureCard(
                 icon: Icons.lock_outline,
                 title: 'Non-Custodial',
                 subtitle: 'Complete control of your assets',
               ),
               const SizedBox(height: 16),
-              _FeatureCard(
+              const _FeatureCard(
                 icon: Icons.language,
                 title: 'Multi-Chain',
                 subtitle: 'Support for BTC, ETH, and FIL',
               ),
+
               const Spacer(),
+
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -65,6 +78,7 @@ class OnboardingScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 16),
+
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -86,6 +100,7 @@ class OnboardingScreen extends StatelessWidget {
                   child: const Text('Import Existing Wallet'),
                 ),
               ),
+
               const SizedBox(height: 30),
             ],
           ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../core/constants/app_constants.dart';
@@ -34,17 +35,16 @@ class _SplashScreenState extends State<SplashScreen> {
     if (!mounted) return;
 
     if (!walletCreated) {
-      // No wallet created, go to onboarding
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const OnboardingScreen()),
       );
     } else if (hasPin && !authProvider.isAuthenticated) {
-      // Wallet exists but not authenticated
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const PinScreen(mode: PinScreenMode.verify)),
+        MaterialPageRoute(
+          builder: (_) => const PinScreen(mode: PinScreenMode.verify),
+        ),
       );
     } else {
-      // Already authenticated or no PIN set
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
@@ -62,53 +62,70 @@ class _SplashScreenState extends State<SplashScreen> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: isDark
-                ? [const Color(0xFF1E1E1E), const Color(0xFF121212)]
-                : [const Color(0xFF6C63FF), const Color(0xFF4CAF50)],
+                ? [
+              const Color(0xFF0A0F2C),
+              const Color(0xFF0D1A4A),
+            ] // Sapphire Dark
+                : [
+              const Color(0xFF4F7BFF),
+              const Color(0xFF6CA8FF),
+            ], // Sapphire Light
           ),
         ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // === SVG LOGO ===
               Container(
                 width: 120,
                 height: 120,
+                padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Colors.white.withOpacity(0.95),
                   borderRadius: BorderRadius.circular(30),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 25,
+                      offset: const Offset(0, 12),
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.account_balance_wallet_rounded,
-                  size: 60,
-                  color: Color(0xFF6C63FF),
+                child: SvgPicture.asset(
+                  'assets/icons/logo.svg',  // <-- your SVG file
+                  fit: BoxFit.contain,
+                  colorFilter: ColorFilter.mode(
+                    Theme.of(context).colorScheme.primary,
+                    BlendMode.srcIn,
+                  ),
                 ),
               ),
+
               const SizedBox(height: 30),
+
               Text(
                 AppConstants.appName,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                   letterSpacing: 1.2,
                 ),
               ),
+
               const SizedBox(height: 10),
+
               Text(
                 'Secure • Decentralized • Non-Custodial',
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.white.withOpacity(0.8),
+                  color: Colors.white.withOpacity(0.85),
                 ),
               ),
+
               const SizedBox(height: 50),
+
               const CircularProgressIndicator(
                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),

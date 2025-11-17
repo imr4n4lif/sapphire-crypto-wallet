@@ -19,9 +19,9 @@ class AppConstants {
 
   // Network URLs
   // Ethereum Mainnet (using public Infura endpoint)
-  static const String ethMainnetRpc = 'https://mainnet.infura.io/v3/project_id_will_update_later';
+  static const String ethMainnetRpc = 'https://mainnet.infura.io/v3/project_id';
   // Ethereum Sepolia Testnet
-  static const String ethTestnetRpc = 'https://sepolia.infura.io/v3/project_id_will_update_later';
+  static const String ethTestnetRpc = 'https://sepolia.infura.io/v3/project_id';
 
   // Bitcoin (using BlockCypher API)
   static const String btcMainnetApi = 'https://api.blockcypher.com/v1/btc/main';
