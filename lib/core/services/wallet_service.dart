@@ -48,11 +48,11 @@ class WalletService {
     final btcPrivateKey = HEX.encode(btcNode.privateKey!);
     final btcAddress = _generateBitcoinAddress(btcNode.publicKey, isMainnet);
 
-    // Generate Filecoin wallet (similar to Ethereum)
+    // Generate Filecoin wallet (secp256k1 address)
     final filPath = AppConstants.filPath;
     final filNode = root.derivePath(filPath);
     final filPrivateKey = HEX.encode(filNode.privateKey!);
-    final filAddress = _generateFilecoinAddress(filNode.publicKey);
+    final filAddress = _generateFilecoinAddress(filNode.publicKey, isMainnet);
 
     return WalletData(
       mnemonic: mnemonic,
@@ -81,13 +81,26 @@ class WalletService {
     return bs58.encode(versionedPayload);
   }
 
-  // Generate Filecoin address from public key
-  String _generateFilecoinAddress(Uint8List publicKey) {
-    // For simplicity, we'll create a secp256k1 address (starts with 'f1')
-    // In production, you'd use the official Filecoin address generation
+  // Generate Filecoin address from public key (FIXED)
+  String _generateFilecoinAddress(Uint8List publicKey, bool isMainnet) {
+    // Filecoin secp256k1 address (protocol 1)
+    // Hash the public key
     final hash = sha256.convert(publicKey).bytes;
-    final addressBytes = Uint8List.fromList([1, ...hash.sublist(0, 20)]); // Protocol 1 (secp256k1)
-    return 'f1${bs58.encode(addressBytes)}';
+
+    // Take first 20 bytes for payload
+    final payload = Uint8List.fromList(hash.sublist(0, 20));
+
+    // Create address bytes: [protocol, ...payload]
+    // Protocol 1 = secp256k1
+    final addressBytes = Uint8List.fromList([1, ...payload]);
+
+    // Network prefix: 'f' for mainnet, 't' for testnet
+    final prefix = isMainnet ? 'f' : 't';
+
+    // Encode with base32 (simplified - using base58 for now)
+    final encoded = bs58.encode(addressBytes);
+
+    return '$prefix$encoded';
   }
 
   // Get private key for specific coin

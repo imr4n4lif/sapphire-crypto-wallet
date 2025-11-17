@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/wallet_provider.dart';
 import 'providers/theme_provider.dart';
@@ -10,8 +11,16 @@ import 'core/services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Load .env file
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    print('Warning: .env file not found. Using default values.');
+  }
+
   // Initialize notification service
   await NotificationService().initialize();
+  await NotificationService().requestPermissions();
 
   runApp(const MyApp());
 }

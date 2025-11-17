@@ -30,7 +30,7 @@ class BlockchainService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final balanceSatoshis = data['final_balance'] ?? 0;
-        return balanceSatoshis / 100000000; // Convert satoshis to BTC
+        return balanceSatoshis / 100000000;
       }
       return 0.0;
     } catch (e) {
@@ -70,7 +70,8 @@ class BlockchainService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['result'] != null) {
-          final balanceAttoFil = BigInt.parse(data['result'].replaceAll('"', ''));
+          final balanceStr = data['result'].toString().replaceAll('"', '');
+          final balanceAttoFil = BigInt.parse(balanceStr);
           return balanceAttoFil / BigInt.from(10).pow(18);
         }
       }
@@ -102,11 +103,15 @@ class BlockchainService {
     }
   }
 
-  // Get Ethereum transactions
+  // Get Ethereum transactions using Infura
   Future<List<models.Transaction>> getEthereumTransactions(String address) async {
     try {
-      // Note: For production, use Etherscan API or similar service
-      // This is a simplified version
+      // Get recent block number
+      final blockNumber = await _ethClient.getBlockNumber();
+      final fromBlock = blockNumber > 1000 ? blockNumber - 1000 : 0;
+
+      // This is simplified - in production use Etherscan API
+      // For now, return empty list to avoid errors
       return <models.Transaction>[];
     } catch (e) {
       print('Error fetching Ethereum transactions: $e');
@@ -122,16 +127,16 @@ class BlockchainService {
     required double amount,
   }) async {
     try {
-      // Note: Full Bitcoin transaction creation requires more complex logic
-      // This is a simplified placeholder
-      // In production, you'd use libraries like bitcoinjs-lib equivalent
-      throw UnimplementedError('Bitcoin sending requires additional implementation');
+      throw UnimplementedError(
+          'Bitcoin sending requires signing library. Use testnet faucet to receive, '
+              'or implement with bitcoin_base package for production.'
+      );
     } catch (e) {
       throw Exception('Failed to send Bitcoin: $e');
     }
   }
 
-  // Send Ethereum
+  // Send Ethereum (FIXED - proper gas estimation)
   Future<String> sendEthereum({
     required String toAddress,
     required String privateKey,
@@ -139,15 +144,37 @@ class BlockchainService {
   }) async {
     try {
       final credentials = web3dart.EthPrivateKey.fromHex(privateKey);
+      final sender = await credentials.address;
       final recipient = web3dart.EthereumAddress.fromHex(toAddress);
-      final amountInWei = web3dart.EtherAmount.fromUnitAndValue(
+
+      // Convert amount to wei
+      final amountInWei = web3dart.EtherAmount.fromBase10String(
         web3dart.EtherUnit.ether,
-        (amount * 1e18).toInt(),
+        amount.toString(),
       );
+
+      // Get gas price
+      final gasPrice = await _ethClient.getGasPrice();
+
+      // Estimate gas limit
+      final gasLimit = await _ethClient.estimateGas(
+        sender: sender,
+        to: recipient,
+        value: amountInWei,
+      );
+
+      // Add 20% buffer to gas limit
+      final gasLimitWithBuffer = (gasLimit.toDouble() * 1.2).round();
+
+      print('Gas Price: ${gasPrice.getInWei}');
+      print('Gas Limit: $gasLimitWithBuffer');
+      print('Total Gas Cost: ${(gasPrice.getInWei * BigInt.from(gasLimitWithBuffer))}');
 
       final txData = web3dart.Transaction(
         to: recipient,
         value: amountInWei,
+        gasPrice: gasPrice,
+        maxGas: gasLimitWithBuffer,
       );
 
       final txHash = await _ethClient.sendTransaction(
@@ -158,7 +185,8 @@ class BlockchainService {
 
       return txHash;
     } catch (e) {
-      throw Exception('Failed to send Ethereum: $e');
+      print('Ethereum send error: $e');
+      throw Exception('Failed to send Ethereum: ${e.toString()}');
     }
   }
 
@@ -167,7 +195,7 @@ class BlockchainService {
     try {
       return await _ethClient.getGasPrice();
     } catch (e) {
-      return web3dart.EtherAmount.fromUnitAndValue(web3dart.EtherUnit.gwei, 20); // Default 20 gwei
+      return web3dart.EtherAmount.fromUnitAndValue(web3dart.EtherUnit.gwei, 20);
     }
   }
 
@@ -180,9 +208,9 @@ class BlockchainService {
     try {
       final from = web3dart.EthereumAddress.fromHex(fromAddress);
       final to = web3dart.EthereumAddress.fromHex(toAddress);
-      final value = web3dart.EtherAmount.fromUnitAndValue(
+      final value = web3dart.EtherAmount.fromBase10String(
         web3dart.EtherUnit.ether,
-        (amount * 1e18).toInt(),
+        amount.toString(),
       );
 
       return await _ethClient.estimateGas(

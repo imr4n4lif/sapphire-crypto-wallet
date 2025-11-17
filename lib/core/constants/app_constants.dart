@@ -1,3 +1,5 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConstants {
   // App Info
   static const String appName = 'Sapphire Wallet';
@@ -17,11 +19,12 @@ class AppConstants {
   static const String ethPath = "m/44'/60'/0'/0/0";
   static const String filPath = "m/44'/461'/0'/0/0";
 
+  // Get Infura Project ID from .env
+  static String get infuraProjectId => dotenv.env['INFURA_PROJECT_ID'] ?? '';
+
   // Network URLs
-  // Ethereum Mainnet (using public Infura endpoint)
-  static const String ethMainnetRpc = 'https://mainnet.infura.io/v3/project_id';
-  // Ethereum Sepolia Testnet
-  static const String ethTestnetRpc = 'https://sepolia.infura.io/v3/project_id';
+  static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
+  static String get ethTestnetRpc => 'https://sepolia.infura.io/v3/$infuraProjectId';
 
   // Bitcoin (using BlockCypher API)
   static const String btcMainnetApi = 'https://api.blockcypher.com/v1/btc/main';
