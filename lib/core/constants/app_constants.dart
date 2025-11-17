@@ -19,8 +19,9 @@ class AppConstants {
   static const String ethPath = "m/44'/60'/0'/0/0";
   static const String filPath = "m/44'/461'/0'/0/0";
 
-  // Get Infura Project ID from .env
+  // Get API Keys from .env
   static String get infuraProjectId => dotenv.env['INFURA_PROJECT_ID'] ?? '';
+  static String get etherscanApiKey => dotenv.env['ETHERSCAN_API_KEY'] ?? '';
 
   // Network URLs
   static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
@@ -29,6 +30,10 @@ class AppConstants {
   // Bitcoin (using BlockCypher API)
   static const String btcMainnetApi = 'https://api.blockcypher.com/v1/btc/main';
   static const String btcTestnetApi = 'https://api.blockcypher.com/v1/btc/test3';
+
+  // Etherscan API for transaction history
+  static const String ethMainnetEtherscan = 'https://api.etherscan.io/api';
+  static const String ethTestnetEtherscan = 'https://api-sepolia.etherscan.io/api';
 
   // Filecoin (using public RPC)
   static const String filMainnetRpc = 'https://api.node.glif.io';

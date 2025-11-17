@@ -14,13 +14,18 @@ void main() async {
   // Load .env file
   try {
     await dotenv.load(fileName: ".env");
+    print('✅ .env file loaded');
   } catch (e) {
-    print('Warning: .env file not found. Using default values.');
+    print('⚠️ Warning: .env file not found. Using default values.');
   }
 
   // Initialize notification service
+  print('🔔 Initializing notifications...');
   await NotificationService().initialize();
-  await NotificationService().requestPermissions();
+
+  // Request notification permissions
+  final permissionGranted = await NotificationService().requestPermissions();
+  print('📱 Notification permission: ${permissionGranted ? "granted" : "denied"}');
 
   runApp(const MyApp());
 }

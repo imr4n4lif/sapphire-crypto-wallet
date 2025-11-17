@@ -44,6 +44,20 @@ class _SendScreenState extends State<SendScreen> {
   Future<void> _sendTransaction() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Parse amount carefully
+    final amountText = _amountController.text.trim();
+    final amount = double.tryParse(amountText);
+
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid amount'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -52,9 +66,33 @@ class _SendScreenState extends State<SendScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Send ${_amountController.text} ${_coinInfo.symbol}'),
+            Text(
+              'Send $amount ${_coinInfo.symbol}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 8),
             Text('To: ${_addressController.text}'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Transaction fees will be deducted from your balance',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
         actions: [
@@ -79,25 +117,97 @@ class _SendScreenState extends State<SendScreen> {
       final txHash = await walletProvider.sendTransaction(
         coinType: widget.coinType,
         toAddress: _addressController.text.trim(),
-        amount: double.parse(_amountController.text),
+        amount: amount,
       );
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Transaction sent! Hash: ${txHash.substring(0, 16)}...'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '✅ Transaction sent successfully!',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Hash: ${txHash.substring(0, 20)}...',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ],
+            ),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       setState(() => _isSending = false);
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
+        // Parse error message
+        String errorMessage = e.toString();
+        if (errorMessage.contains('Exception:')) {
+          errorMessage = errorMessage.split('Exception:').last.trim();
+        }
+
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.error_outline, color: Colors.red),
+                SizedBox(width: 8),
+                Text('Transaction Failed'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(errorMessage),
+                  const SizedBox(height: 16),
+                  if (errorMessage.contains('Insufficient funds'))
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '💡 Tips:',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          SizedBox(height: 8),
+                          Text('• Try a smaller amount'),
+                          Text('• You need ETH for gas fees'),
+                          Text('• Get testnet ETH from:'),
+                          Text(
+                            '  sepoliafaucet.com',
+                            style: TextStyle(
+                              color: Colors.blue,
+                              decoration: TextDecoration.underline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
           ),
         );
       }
@@ -158,7 +268,6 @@ class _SendScreenState extends State<SendScreen> {
                   if (value == null || value.trim().isEmpty) {
                     return 'Please enter recipient address';
                   }
-                  // Add more specific validation for each coin type
                   return null;
                 },
               ),
@@ -175,14 +284,17 @@ class _SendScreenState extends State<SendScreen> {
                   if (value == null || value.trim().isEmpty) {
                     return 'Please enter amount';
                   }
-                  final amount = double.tryParse(value);
+
+                  final amount = double.tryParse(value.trim());
                   if (amount == null || amount <= 0) {
                     return 'Please enter valid amount';
                   }
+
                   final balance = context.read<WalletProvider>().getCoinBalance(widget.coinType);
                   if (balance != null && amount > balance.balance) {
                     return 'Insufficient balance';
                   }
+
                   return null;
                 },
               ),

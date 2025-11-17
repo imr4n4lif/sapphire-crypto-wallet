@@ -5,6 +5,7 @@ import '../../providers/wallet_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../core/services/wallet_service.dart';
+import '../../core/services/blockchain_service.dart';
 import '../../core/constants/app_constants.dart';
 import '../splash_screen.dart';
 
@@ -47,6 +48,7 @@ class SettingsScreen extends StatelessWidget {
             [
               _buildViewSeedPhraseTile(context),
               _buildViewPrivateKeysTile(context),
+              _buildClearCacheTile(context),
               _buildDeleteWalletTile(context),
             ],
           ),
@@ -61,6 +63,47 @@ class SettingsScreen extends StatelessWidget {
                   AppConstants.appVersion,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.speed),
+                title: const Text('API Rate Limits'),
+                subtitle: const Text('Auto-refresh every 5 minutes'),
+                trailing: const Icon(Icons.info_outline),
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Rate Limiting Info'),
+                      content: const SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('To avoid API rate limits:'),
+                            SizedBox(height: 8),
+                            Text('• Auto-refresh runs every 5 minutes'),
+                            Text('• Manual refresh has 2 second delays'),
+                            Text('• Cached data used when rate limited'),
+                            SizedBox(height: 12),
+                            Text('BlockCypher (Bitcoin):',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text('• 200 requests/hour (free tier)'),
+                            SizedBox(height: 8),
+                            Text('Etherscan (Ethereum):',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text('• 100,000 requests/day (free tier)'),
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
           ),
@@ -105,7 +148,7 @@ class SettingsScreen extends StatelessWidget {
               builder: (context) => AlertDialog(
                 title: const Text('Switch Network'),
                 content: Text(
-                  'Switch to ${value ? 'Mainnet' : 'Testnet'}? This will reload your wallet.',
+                  'Switch to ${value ? 'Mainnet' : 'Testnet'}? This will reload your wallet and clear cache.',
                 ),
                 actions: [
                   TextButton(
@@ -215,6 +258,46 @@ class SettingsScreen extends StatelessWidget {
           context,
           MaterialPageRoute(builder: (_) => const ViewPrivateKeysScreen()),
         );
+      },
+    );
+  }
+
+  Widget _buildClearCacheTile(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.cleaning_services),
+      title: const Text('Clear Cache'),
+      subtitle: const Text('Clear API cache if experiencing issues'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () async {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Clear Cache'),
+            content: const Text(
+              'This will clear cached API responses. Use this if you\'re getting rate limit errors or stale data.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmed == true && context.mounted) {
+          BlockchainService().clearCache();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Cache cleared successfully'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       },
     );
   }
@@ -393,11 +476,8 @@ class ViewSeedPhraseScreen extends StatelessWidget {
                   children: [
                     Icon(Icons.warning_amber_rounded, color: Theme.of(context).colorScheme.error),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Never share your seed phrase with anyone!',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                    const Expanded(
+                      child: Text('Never share your seed phrase with anyone!'),
                     ),
                   ],
                 ),
@@ -494,11 +574,8 @@ class ViewPrivateKeysScreen extends StatelessWidget {
                   children: [
                     Icon(Icons.warning_amber_rounded, color: Theme.of(context).colorScheme.error),
                     const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Never share your private keys with anyone!',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                    const Expanded(
+                      child: Text('Never share your private keys with anyone!'),
                     ),
                   ],
                 ),

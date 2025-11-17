@@ -14,16 +14,35 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Initial refresh
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<WalletProvider>().refreshBalances();
+      _refreshData();
     });
   }
 
-  Future<void> _refresh() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Refresh when app comes to foreground
+    if (state == AppLifecycleState.resumed) {
+      print('🔄 App resumed, refreshing data...');
+      _refreshData();
+    }
+  }
+
+  Future<void> _refreshData() async {
+    print('🔄 Manual refresh triggered');
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
   }
@@ -34,6 +53,11 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Wallet'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: _refreshData,
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () {
@@ -48,21 +72,42 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Consumer<WalletProvider>(
         builder: (context, walletProvider, _) {
           if (walletProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading wallet...'),
+                ],
+              ),
+            );
           }
 
           return RefreshIndicator(
-            onRefresh: _refresh,
+            onRefresh: _refreshData,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _buildPortfolioCard(walletProvider),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
                 _buildNetworkBadge(walletProvider),
                 const SizedBox(height: 24),
-                Text(
-                  'Assets',
-                  style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Assets',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text(
+                      'Auto-refresh: ON',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.green,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 ...CoinInfo.allCoins.map((coin) {
@@ -79,6 +124,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildPortfolioCard(WalletProvider walletProvider) {
     final formatter = NumberFormat.currency(symbol: '\$', decimalDigits: 2);
+    final now = DateTime.now();
+    final timeString = DateFormat('HH:mm').format(now);
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -123,13 +170,13 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               Icon(
-                Icons.trending_up,
+                Icons.access_time,
                 color: Colors.white.withOpacity(0.9),
-                size: 20,
+                size: 16,
               ),
               const SizedBox(width: 4),
               Text(
-                'Last updated: ${TimeOfDay.now().format(context)}',
+                'Last updated: $timeString',
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.8),
                   fontSize: 12,
