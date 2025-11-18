@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../providers/wallet_provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../models/wallet.dart';
@@ -15,6 +17,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  List<double> _portfolioHistory = [];
+
   @override
   void initState() {
     super.initState();
@@ -45,13 +49,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     print('🔄 Manual refresh triggered');
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
+
+    // Update portfolio history for graph
+    final totalValue = context.read<WalletProvider>().totalPortfolioValue;
+    setState(() {
+      _portfolioHistory.add(totalValue);
+      // Keep only last 20 data points
+      if (_portfolioHistory.length > 20) {
+        _portfolioHistory.removeAt(0);
+      }
+    });
+  }
+
+  void _showWalletMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => _WalletMenuSheet(),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wallet'),
+        title: GestureDetector(
+          onTap: () => _showWalletMenu(context),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Consumer<WalletProvider>(
+                builder: (context, walletProvider, _) {
+                  return Text(
+                    walletProvider.currentWalletName ?? 'Wallet',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_drop_down, size: 20),
+            ],
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -90,6 +128,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.all(16),
               children: [
                 _buildPortfolioCard(walletProvider),
+                const SizedBox(height: 16),
+                _buildPortfolioGraph(walletProvider),
                 const SizedBox(height: 16),
                 _buildNetworkBadge(walletProvider),
                 const SizedBox(height: 24),
@@ -185,6 +225,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPortfolioGraph(WalletProvider walletProvider) {
+    if (_portfolioHistory.length < 2) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Portfolio Trend',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 120,
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(show: false),
+                  titlesData: FlTitlesData(show: false),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: _portfolioHistory.asMap().entries.map((entry) {
+                        return FlSpot(entry.key.toDouble(), entry.value);
+                      }).toList(),
+                      isCurved: true,
+                      color: Theme.of(context).colorScheme.primary,
+                      barWidth: 2,
+                      dotData: FlDotData(show: false),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -307,6 +394,377 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// Wallet Menu Bottom Sheet
+class _WalletMenuSheet extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<WalletProvider>(
+      builder: (context, walletProvider, _) {
+        final wallets = walletProvider.allWallets;
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Your Wallets',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _showCreateWalletDialog(context);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              ...wallets.map((wallet) {
+                final isSelected = walletProvider.currentWalletId == wallet['id'];
+                return Card(
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primaryContainer
+                      : null,
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.account_balance_wallet,
+                      color: isSelected
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
+                    ),
+                    title: Text(
+                      wallet['name'] ?? 'Wallet ${wallet['id']}',
+                      style: TextStyle(
+                        fontWeight: isSelected ? FontWeight.bold : null,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${(wallet['ethAddress'] as String).substring(0, 10)}...',
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                    trailing: isSelected
+                        ? Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary)
+                        : IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () {
+                        _confirmDeleteWallet(context, wallet['id'] as String);
+                      },
+                    ),
+                    onTap: () async {
+                      if (!isSelected) {
+                        await walletProvider.switchWallet(wallet['id'] as String);
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                        }
+                      }
+                    },
+                  ),
+                );
+              }).toList(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCreateWalletDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add Wallet'),
+        content: const Text('Would you like to create a new wallet or import an existing one?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showImportWalletDialog(context);
+            },
+            child: const Text('Import'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _showCreateNewWalletDialog(context);
+            },
+            child: const Text('Create New'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCreateNewWalletDialog(BuildContext context) {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create New Wallet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'Wallet Name',
+                hintText: 'e.g., My Trading Wallet',
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'A new wallet with a fresh mnemonic will be created.',
+              style: TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a wallet name')),
+                );
+                return;
+              }
+
+              final mnemonic = await context.read<WalletProvider>().createNewWallet(name);
+              if (context.mounted) {
+                Navigator.pop(context);
+                _showMnemonicDialog(context, name, mnemonic);
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMnemonicDialog(BuildContext context, String walletName, String mnemonic) {
+    final words = mnemonic.split(' ');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text('$walletName Created'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        color: Theme.of(context).colorScheme.error),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Write down these words and store them safely!',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemCount: words.length,
+                itemBuilder: (context, index) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${index + 1}.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            words[index],
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: mnemonic));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mnemonic copied to clipboard')),
+              );
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('Copy'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImportWalletDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    final mnemonicController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import Wallet'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Wallet Name',
+                  hintText: 'e.g., My Imported Wallet',
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: mnemonicController,
+                decoration: const InputDecoration(
+                  labelText: 'Seed Phrase',
+                  hintText: 'Enter 12 words',
+                ),
+                maxLines: 3,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final mnemonic = mnemonicController.text.trim();
+
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a wallet name')),
+                );
+                return;
+              }
+
+              if (mnemonic.split(RegExp(r'\s+')).length != 12) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter exactly 12 words')),
+                );
+                return;
+              }
+
+              try {
+                await context.read<WalletProvider>().importExistingWallet(name, mnemonic);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Imported wallet: $name')),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: ${e.toString()}')),
+                  );
+                }
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteWallet(BuildContext context, String walletId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Wallet'),
+        content: const Text(
+          'Are you sure? Make sure you have backed up the seed phrase.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await context.read<WalletProvider>().deleteWalletById(walletId);
+              if (context.mounted) {
+                Navigator.pop(context);
+                Navigator.pop(context); // Close bottom sheet too
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }

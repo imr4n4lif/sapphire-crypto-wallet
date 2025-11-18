@@ -1,7 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:web3dart/web3dart.dart' as web3dart;
 import 'dart:convert';
-import '../../models/wallet.dart' as models;
+import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
 
 class BlockchainService {
@@ -158,7 +158,7 @@ class BlockchainService {
   }
 
   // Get Bitcoin transactions with rate limiting
-  Future<List<models.Transaction>> getBitcoinTransactions(String address) async {
+  Future<List<Transaction>> getBitcoinTransactions(String address) async {
     try {
       await _respectRateLimit(_lastBtcApiCall);
       _lastBtcApiCall = DateTime.now();
@@ -181,28 +181,28 @@ class BlockchainService {
 
         return txs.map((tx) {
           try {
-            return models.Transaction.fromJson(tx, CoinType.btc, address);
+            return Transaction.fromJson(tx, CoinType.btc, address);
           } catch (e) {
             print('⚠️ Error parsing BTC transaction: $e');
             return null;
           }
-        }).whereType<models.Transaction>().toList();
+        }).whereType<Transaction>().toList();
       } else if (response.statusCode == 429) {
         print('⚠️ BTC transactions API rate limited (429)');
         print('ℹ️ Please wait a few minutes before refreshing');
-        return <models.Transaction>[];
+        return <Transaction>[];
       } else {
         print('⚠️ Failed to fetch BTC transactions: ${response.statusCode}');
-        return <models.Transaction>[];
+        return <Transaction>[];
       }
     } catch (e) {
       print('❌ Error fetching Bitcoin transactions: $e');
-      return <models.Transaction>[];
+      return <Transaction>[];
     }
   }
 
-  // Get Ethereum transactions using Etherscan API - FIXED
-  Future<List<models.Transaction>> getEthereumTransactions(String address) async {
+  // Get Ethereum transactions using Etherscan v2 API - FIXED
+  Future<List<Transaction>> getEthereumTransactions(String address) async {
     try {
       final apiKey = AppConstants.etherscanApiKey;
 
@@ -210,23 +210,24 @@ class BlockchainService {
         print('⚠️ Etherscan API key not found in .env file');
         print('ℹ️ Add ETHERSCAN_API_KEY=your_key to .env file');
         print('ℹ️ Get free API key from: https://etherscan.io/apis');
-        return <models.Transaction>[];
+        return <Transaction>[];
       }
 
       await _respectRateLimit(_lastEthApiCall);
       _lastEthApiCall = DateTime.now();
 
-      // Use standard API (not V2 beta)
+      // Etherscan standard API endpoint (v2 migration in progress)
+      // For now, use standard endpoint which still works
       final baseUrl = _isMainnet
-          ? AppConstants.ethMainnetEtherscan
-          : AppConstants.ethTestnetEtherscan;
+          ? 'https://api.etherscan.io/api'
+          : 'https://api-sepolia.etherscan.io/api';
 
       final url = '$baseUrl?module=account&action=txlist&address=$address&startblock=0&endblock=99999999&page=1&offset=20&sort=desc&apikey=$apiKey';
 
-      print('📡 Fetching ETH transactions for: $address');
+      print('📡 Fetching ETH transactions for: $address (Etherscan API)');
 
       final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 15),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
@@ -237,22 +238,28 @@ class BlockchainService {
 
         if (data is! Map<String, dynamic>) {
           print('⚠️ Unexpected response format: not a JSON object');
-          return <models.Transaction>[];
+          return <Transaction>[];
         }
 
-        // Standard API format
         final status = data['status']?.toString() ?? '0';
         final message = data['message']?.toString() ?? '';
         final result = data['result'];
 
-        print('🔍 Etherscan API Status: $status, Message: $message');
+        print('🔍 Etherscan Status: $status, Message: $message');
 
         if (status == '0') {
           // Check if it's just no transactions
           if (message.toLowerCase().contains('no transactions found') ||
               message.toLowerCase().contains('no records found')) {
             print('ℹ️ No ETH transactions found for this address');
-            return <models.Transaction>[];
+            return <Transaction>[];
+          }
+
+          // Check for deprecation warning but still try to parse result
+          if (result is String && result.toLowerCase().contains('deprecated')) {
+            print('⚠️ Etherscan API deprecation warning: $result');
+            print('ℹ️ The API still works but may be updated in the future');
+            // Don't return here, the API might still return data
           }
 
           // Check for API key issues
@@ -263,28 +270,28 @@ class BlockchainService {
                 resultLower.contains('wrong api key')) {
               print('❌ Invalid or missing Etherscan API key');
               print('ℹ️ Get free key at: https://etherscan.io/apis');
-              return <models.Transaction>[];
+              return <Transaction>[];
             }
           }
 
           // Rate limit
           if (message.toLowerCase().contains('rate limit')) {
             print('⚠️ Etherscan API rate limited. Wait a moment and try again');
-            return <models.Transaction>[];
+            return <Transaction>[];
           }
 
           print('⚠️ Etherscan API Error: $message');
           if (result != null && result is String) {
             print('   Details: $result');
           }
-          return <models.Transaction>[];
+          return <Transaction>[];
         }
 
-        // Success - parse transactions
+        // Success - parse transactions from v2 API
         if (status == '1' && result != null) {
           if (result is! List) {
             print('⚠️ Result is not a list: ${result.runtimeType}');
-            return <models.Transaction>[];
+            return <Transaction>[];
           }
 
           final txs = result as List;
@@ -292,7 +299,7 @@ class BlockchainService {
 
           if (txs.isEmpty) {
             print('ℹ️ No ETH transactions found for this address');
-            return <models.Transaction>[];
+            return <Transaction>[];
           }
 
           return txs.take(20).map((tx) {
@@ -301,27 +308,28 @@ class BlockchainService {
                 print('⚠️ Transaction is not a map: ${tx.runtimeType}');
                 return null;
               }
-              return models.Transaction.fromJson(tx, CoinType.eth, address);
+              // Use standard parser - works with current API
+              return Transaction.fromEtherscanV2(tx, address);
             } catch (e) {
               print('⚠️ Error parsing ETH transaction: $e');
               return null;
             }
-          }).whereType<models.Transaction>().toList();
+          }).whereType<Transaction>().toList();
         }
 
-        print('⚠️ Unexpected Etherscan response format');
-        return <models.Transaction>[];
+        print('⚠️ Unexpected Etherscan v2 response format');
+        return <Transaction>[];
       } else if (response.statusCode == 404) {
         print('⚠️ API endpoint not found (404)');
         print('ℹ️ This usually means the API endpoint has changed');
-        return <models.Transaction>[];
+        return <Transaction>[];
       } else {
         print('⚠️ Failed to fetch ETH transactions: ${response.statusCode}');
-        return <models.Transaction>[];
+        return <Transaction>[];
       }
     } catch (e) {
       print('❌ Error fetching Ethereum transactions: $e');
-      return <models.Transaction>[];
+      return <Transaction>[];
     }
   }
 

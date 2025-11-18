@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:convert';
 import '../models/wallet.dart';
 import '../core/constants/app_constants.dart';
 import '../core/services/wallet_service.dart';
@@ -14,6 +15,10 @@ class WalletProvider with ChangeNotifier {
   final PriceService _priceService = PriceService();
   final SecureStorageService _storage = SecureStorageService();
   final NotificationService _notificationService = NotificationService();
+
+  // Multi-wallet support
+  List<Map<String, dynamic>> _allWallets = [];
+  String? _currentWalletId;
 
   WalletData? _wallet;
   bool _isMainnet = true;
@@ -31,11 +36,23 @@ class WalletProvider with ChangeNotifier {
   bool get isRefreshing => _isRefreshing;
   Map<CoinType, CoinBalance> get balances => _balances;
   Map<CoinType, List<Transaction>> get transactions => _transactions;
+  List<Map<String, dynamic>> get allWallets => _allWallets;
+  String? get currentWalletId => _currentWalletId;
+  String? get currentWalletName => _getCurrentWalletName();
 
   double get totalPortfolioValue {
     final total = _balances.values.fold(0.0, (sum, balance) => sum + balance.usdValue);
     print('💰 Total portfolio value: \$$total');
     return total;
+  }
+
+  String? _getCurrentWalletName() {
+    if (_currentWalletId == null) return null;
+    final wallet = _allWallets.firstWhere(
+          (w) => w['id'] == _currentWalletId,
+      orElse: () => {},
+    );
+    return wallet['name'] as String?;
   }
 
   Future<void> initialize() async {
@@ -48,16 +65,27 @@ class WalletProvider with ChangeNotifier {
       _isMainnet = await _storage.readBool(AppConstants.keyIsMainnet, defaultValue: true);
       _blockchainService.initialize(_isMainnet);
 
-      final mnemonic = await _storage.readSecure(AppConstants.keyMnemonic);
-      if (mnemonic != null) {
-        print('✅ Wallet found, loading...');
-        _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
+      // Load all wallets
+      await _loadAllWallets();
+
+      // Load current wallet ID
+      _currentWalletId = await _storage.readString('current_wallet_id');
+
+      if (_allWallets.isNotEmpty) {
+        // If no current wallet set, use first one
+        if (_currentWalletId == null) {
+          _currentWalletId = _allWallets.first['id'] as String;
+          await _storage.saveString('current_wallet_id', _currentWalletId!);
+        }
+
+        // Load current wallet
+        await _loadCurrentWallet();
         await refreshBalances();
         await refreshTransactions();
 
         _startAutoRefresh();
       } else {
-        print('ℹ️ No wallet found');
+        print('ℹ️ No wallets found');
       }
     } catch (e) {
       print('❌ Error initializing wallet: $e');
@@ -65,6 +93,144 @@ class WalletProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _loadAllWallets() async {
+    final walletsJson = await _storage.readString('all_wallets');
+    if (walletsJson != null) {
+      try {
+        final List<dynamic> decoded = json.decode(walletsJson);
+        _allWallets = decoded.cast<Map<String, dynamic>>();
+        print('✅ Loaded ${_allWallets.length} wallets');
+      } catch (e) {
+        print('❌ Error loading wallets: $e');
+        _allWallets = [];
+      }
+    }
+  }
+
+  Future<void> _saveAllWallets() async {
+    final encoded = json.encode(_allWallets);
+    await _storage.saveString('all_wallets', encoded);
+  }
+
+  Future<void> _loadCurrentWallet() async {
+    if (_currentWalletId == null) return;
+
+    final mnemonic = await _storage.readSecure('mnemonic_$_currentWalletId');
+    if (mnemonic != null) {
+      print('✅ Loading wallet: $_currentWalletId');
+      _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
+    }
+  }
+
+  Future<String> createNewWallet(String name) async {
+    print('🆕 Creating new wallet: $name');
+
+    try {
+      final mnemonic = _walletService.generateMnemonic();
+      final walletData = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
+
+      // Generate unique ID
+      final walletId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // Save mnemonic
+      await _storage.saveSecure('mnemonic_$walletId', mnemonic);
+
+      // Add to wallets list
+      _allWallets.add({
+        'id': walletId,
+        'name': name,
+        'ethAddress': walletData.ethAddress,
+        'btcAddress': walletData.btcAddress,
+        'filAddress': walletData.filAddress,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      await _saveAllWallets();
+
+      // Switch to new wallet
+      await switchWallet(walletId);
+
+      return mnemonic;
+    } catch (e) {
+      print('❌ Failed to create wallet: $e');
+      throw Exception('Failed to create wallet: $e');
+    }
+  }
+
+  Future<void> importExistingWallet(String name, String mnemonic) async {
+    print('📥 Importing wallet: $name');
+
+    try {
+      if (!_walletService.validateMnemonic(mnemonic)) {
+        throw Exception('Invalid mnemonic phrase');
+      }
+
+      final walletData = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
+
+      // Generate unique ID
+      final walletId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      // Save mnemonic
+      await _storage.saveSecure('mnemonic_$walletId', mnemonic);
+
+      // Add to wallets list
+      _allWallets.add({
+        'id': walletId,
+        'name': name,
+        'ethAddress': walletData.ethAddress,
+        'btcAddress': walletData.btcAddress,
+        'filAddress': walletData.filAddress,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      await _saveAllWallets();
+
+      // Switch to imported wallet
+      await switchWallet(walletId);
+
+      print('✅ Wallet imported successfully');
+    } catch (e) {
+      print('❌ Failed to import wallet: $e');
+      throw Exception('Failed to import wallet: $e');
+    }
+  }
+
+  Future<void> switchWallet(String walletId) async {
+    print('🔄 Switching to wallet: $walletId');
+
+    _currentWalletId = walletId;
+    await _storage.saveString('current_wallet_id', walletId);
+
+    await _loadCurrentWallet();
+    await refreshBalances();
+    await refreshTransactions();
+
+    notifyListeners();
+  }
+
+  Future<void> deleteWalletById(String walletId) async {
+    print('🗑️ Deleting wallet: $walletId');
+
+    // Don't delete if it's the only wallet
+    if (_allWallets.length == 1) {
+      throw Exception('Cannot delete the only wallet');
+    }
+
+    // Delete mnemonic
+    await _storage.deleteSecure('mnemonic_$walletId');
+
+    // Remove from list
+    _allWallets.removeWhere((w) => w['id'] == walletId);
+    await _saveAllWallets();
+
+    // If deleted current wallet, switch to first available
+    if (_currentWalletId == walletId) {
+      await switchWallet(_allWallets.first['id'] as String);
+    }
+
+    notifyListeners();
   }
 
   void _startAutoRefresh() {
@@ -96,8 +262,23 @@ class WalletProvider with ChangeNotifier {
       final mnemonic = _walletService.generateMnemonic();
       _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
 
-      await _storage.saveSecure(AppConstants.keyMnemonic, mnemonic);
+      final walletId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      await _storage.saveSecure('mnemonic_$walletId', mnemonic);
       await _storage.saveBool(AppConstants.keyWalletCreated, true);
+
+      _allWallets.add({
+        'id': walletId,
+        'name': 'Main Wallet',
+        'ethAddress': _wallet!.ethAddress,
+        'btcAddress': _wallet!.btcAddress,
+        'filAddress': _wallet!.filAddress,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      _currentWalletId = walletId;
+      await _storage.saveString('current_wallet_id', walletId);
+      await _saveAllWallets();
 
       await refreshBalances();
 
@@ -129,8 +310,23 @@ class WalletProvider with ChangeNotifier {
 
       _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
 
-      await _storage.saveSecure(AppConstants.keyMnemonic, mnemonic);
+      final walletId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      await _storage.saveSecure('mnemonic_$walletId', mnemonic);
       await _storage.saveBool(AppConstants.keyWalletCreated, true);
+
+      _allWallets.add({
+        'id': walletId,
+        'name': 'Imported Wallet',
+        'ethAddress': _wallet!.ethAddress,
+        'btcAddress': _wallet!.btcAddress,
+        'filAddress': _wallet!.filAddress,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+
+      _currentWalletId = walletId;
+      await _storage.saveString('current_wallet_id', walletId);
+      await _saveAllWallets();
 
       await refreshBalances();
       await refreshTransactions();
@@ -155,9 +351,18 @@ class WalletProvider with ChangeNotifier {
     _stopAutoRefresh();
     _blockchainService.clearCache();
 
-    await _storage.deleteSecure(AppConstants.keyMnemonic);
+    // Delete all wallets
+    for (var wallet in _allWallets) {
+      await _storage.deleteSecure('mnemonic_${wallet['id']}');
+    }
+
+    await _storage.saveString('all_wallets', '[]');
+    await _storage.saveString('current_wallet_id', '');
     await _storage.saveBool(AppConstants.keyWalletCreated, false);
+
     _wallet = null;
+    _allWallets.clear();
+    _currentWalletId = null;
     _balances.clear();
     _transactions.clear();
     notifyListeners();
@@ -173,8 +378,8 @@ class WalletProvider with ChangeNotifier {
     _blockchainService.initialize(_isMainnet);
     _blockchainService.clearCache();
 
-    if (_wallet != null) {
-      final mnemonic = await _storage.readSecure(AppConstants.keyMnemonic);
+    if (_wallet != null && _currentWalletId != null) {
+      final mnemonic = await _storage.readSecure('mnemonic_$_currentWalletId');
       if (mnemonic != null) {
         _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
       }

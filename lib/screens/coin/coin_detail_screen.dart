@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../providers/wallet_provider.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/services/price_service.dart';
 import '../../models/wallet.dart';
 import 'send_screen.dart';
 import 'receive_screen.dart';
+
+enum TimelineOption { day, week, month, threeMonths, year }
 
 class CoinDetailScreen extends StatefulWidget {
   final CoinType coinType;
@@ -17,12 +21,16 @@ class CoinDetailScreen extends StatefulWidget {
 }
 
 class _CoinDetailScreenState extends State<CoinDetailScreen> {
+  TimelineOption _selectedTimeline = TimelineOption.week;
+  List<PricePoint> _priceHistory = [];
+  bool _loadingHistory = false;
+
   @override
   void initState() {
     super.initState();
-    // FIXED: Use addPostFrameCallback to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshData();
+      _loadPriceHistory();
     });
   }
 
@@ -30,6 +38,50 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
     if (!mounted) return;
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
+  }
+
+  Future<void> _loadPriceHistory() async {
+    setState(() => _loadingHistory = true);
+
+    final days = _getTimelineDays(_selectedTimeline);
+    final history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
+
+    if (mounted) {
+      setState(() {
+        _priceHistory = history;
+        _loadingHistory = false;
+      });
+    }
+  }
+
+  int _getTimelineDays(TimelineOption timeline) {
+    switch (timeline) {
+      case TimelineOption.day:
+        return 1;
+      case TimelineOption.week:
+        return 7;
+      case TimelineOption.month:
+        return 30;
+      case TimelineOption.threeMonths:
+        return 90;
+      case TimelineOption.year:
+        return 365;
+    }
+  }
+
+  String _getTimelineLabel(TimelineOption timeline) {
+    switch (timeline) {
+      case TimelineOption.day:
+        return '24H';
+      case TimelineOption.week:
+        return '1W';
+      case TimelineOption.month:
+        return '1M';
+      case TimelineOption.threeMonths:
+        return '3M';
+      case TimelineOption.year:
+        return '1Y';
+    }
   }
 
   CoinInfo get _coinInfo {
@@ -48,11 +100,16 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
           final transactions = walletProvider.getCoinTransactions(widget.coinType);
 
           return RefreshIndicator(
-            onRefresh: _refreshData,
+            onRefresh: () async {
+              await _refreshData();
+              await _loadPriceHistory();
+            },
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
                 _buildBalanceCard(balance),
+                const SizedBox(height: 24),
+                _buildPriceChart(balance),
                 const SizedBox(height: 24),
                 _buildActionButtons(),
                 const SizedBox(height: 32),
@@ -172,6 +229,106 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPriceChart(CoinBalance? balance) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Price History',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            // Timeline selector
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: TimelineOption.values.map((option) {
+                  final isSelected = _selectedTimeline == option;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(_getTimelineLabel(option)),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        if (selected) {
+                          setState(() => _selectedTimeline = option);
+                          _loadPriceHistory();
+                        }
+                      },
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 200,
+              child: _loadingHistory
+                  ? const Center(child: CircularProgressIndicator())
+                  : _priceHistory.isEmpty
+                  ? Center(
+                child: Text(
+                  'No price data available',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              )
+                  : LineChart(
+                LineChartData(
+                  gridData: FlGridData(show: false),
+                  titlesData: FlTitlesData(
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 60,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            '\$${value.toStringAsFixed(0)}',
+                            style: const TextStyle(fontSize: 10),
+                          );
+                        },
+                      ),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: _priceHistory.asMap().entries.map((entry) {
+                        return FlSpot(
+                          entry.key.toDouble(),
+                          entry.value.price,
+                        );
+                      }).toList(),
+                      isCurved: true,
+                      color: Theme.of(context).colorScheme.primary,
+                      barWidth: 2,
+                      dotData: FlDotData(show: false),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

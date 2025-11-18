@@ -1,4 +1,4 @@
-import '../core/constants/app_constants.dart';
+import 'package:crypto_wallet/core/constants/app_constants.dart';
 
 class WalletData {
   final String mnemonic;
@@ -8,6 +8,7 @@ class WalletData {
   final String ethPrivateKey;
   final String filAddress;
   final String filPrivateKey;
+  final String? name; // For multi-wallet support
 
   WalletData({
     required this.mnemonic,
@@ -17,7 +18,21 @@ class WalletData {
     required this.ethPrivateKey,
     required this.filAddress,
     required this.filPrivateKey,
+    this.name,
   });
+
+  WalletData copyWith({String? name}) {
+    return WalletData(
+      mnemonic: mnemonic,
+      btcAddress: btcAddress,
+      btcPrivateKey: btcPrivateKey,
+      ethAddress: ethAddress,
+      ethPrivateKey: ethPrivateKey,
+      filAddress: filAddress,
+      filPrivateKey: filPrivateKey,
+      name: name ?? this.name,
+    );
+  }
 }
 
 class CoinBalance {
@@ -26,6 +41,7 @@ class CoinBalance {
   final double usdValue;
   final double pricePerCoin;
   final double change24h;
+  final List<PricePoint> priceHistory;
 
   CoinBalance({
     required this.coinType,
@@ -33,6 +49,7 @@ class CoinBalance {
     required this.usdValue,
     required this.pricePerCoin,
     required this.change24h,
+    this.priceHistory = const [],
   });
 
   CoinBalance copyWith({
@@ -41,6 +58,7 @@ class CoinBalance {
     double? usdValue,
     double? pricePerCoin,
     double? change24h,
+    List<PricePoint>? priceHistory,
   }) {
     return CoinBalance(
       coinType: coinType ?? this.coinType,
@@ -48,6 +66,7 @@ class CoinBalance {
       usdValue: usdValue ?? this.usdValue,
       pricePerCoin: pricePerCoin ?? this.pricePerCoin,
       change24h: change24h ?? this.change24h,
+      priceHistory: priceHistory ?? this.priceHistory,
     );
   }
 }
@@ -77,7 +96,7 @@ class Transaction {
     required this.isIncoming,
   });
 
-  // V1 API Parser (for Bitcoin and legacy Ethereum)
+  // Bitcoin transaction parsing (unchanged)
   factory Transaction.fromJson(Map<String, dynamic> json, CoinType coinType, String myAddress) {
     try {
       // Bitcoin transaction parsing
@@ -136,64 +155,42 @@ class Transaction {
         );
       }
 
-      // Ethereum transaction parsing (V1 API)
-      return Transaction(
-        hash: json['hash'] ?? json['txid'] ?? '',
-        coinType: coinType,
-        from: json['from'] ?? '',
-        to: json['to'] ?? '',
-        amount: _parseAmount(json, coinType),
-        timestamp: _parseTimestamp(json),
-        confirmations: json['confirmations'] ?? 0,
-        fee: _parseFee(json, coinType),
-        status: _getStatus(json['confirmations'] ?? 0, coinType),
-        isIncoming: _isIncoming(json, myAddress),
-      );
+      // For other coins, shouldn't reach here
+      throw Exception('Unsupported coin type for this parser');
     } catch (e) {
       print('❌ Error parsing transaction: $e');
       rethrow;
     }
   }
 
-  // V2 API Parser (for Ethereum Etherscan V2)
-  factory Transaction.fromJsonV2(Map<String, dynamic> json, CoinType coinType, String myAddress) {
+  // Etherscan v2 API Parser - FIXED for new response format
+  factory Transaction.fromEtherscanV2(Map<String, dynamic> json, String myAddress) {
     try {
-      // V2 API structure is different
-      // Example: {hash, from, to, value, timestamp, gas_used, gas_price, ...}
-
+      // Etherscan v2 uses different field names
       final hash = json['hash']?.toString() ?? '';
       final from = json['from']?.toString() ?? '';
       final to = json['to']?.toString() ?? '';
 
-      // Parse value (in wei)
+      // Parse value (in wei) - handle both string and number formats
       final valueStr = json['value']?.toString() ?? '0';
       final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
       final amount = valueBigInt / BigInt.from(10).pow(18);
 
-      // Parse timestamp
-      final timestampStr = json['timestamp']?.toString() ?? '';
-      DateTime timestamp;
-      try {
-        if (timestampStr.contains('-')) {
-          // ISO format: "2024-01-01T12:00:00Z"
-          timestamp = DateTime.parse(timestampStr);
-        } else {
-          // Unix timestamp
-          final ts = int.tryParse(timestampStr) ?? 0;
-          timestamp = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-        }
-      } catch (e) {
-        timestamp = DateTime.now();
-      }
+      // Parse timestamp - v2 returns unix timestamp as string
+      final timeStampStr = json['timeStamp']?.toString() ?? '0';
+      final ts = int.tryParse(timeStampStr) ?? 0;
+      final timestamp = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
 
-      // Parse confirmations (if available)
-      final confirmations = int.tryParse(json['confirmations']?.toString() ?? '0') ?? 0;
+      // Parse block number to calculate confirmations (if current block is available)
+      final blockNumber = int.tryParse(json['blockNumber']?.toString() ?? '0') ?? 0;
+      // We'll default to confirmed if blockNumber exists
+      final confirmations = blockNumber > 0 ? 15 : 0;
 
-      // Calculate gas fee
+      // Calculate gas fee - v2 API provides gasUsed and gasPrice
       double fee = 0.0;
       try {
-        final gasUsedStr = json['gas_used']?.toString() ?? '0';
-        final gasPriceStr = json['gas_price']?.toString() ?? '0';
+        final gasUsedStr = json['gasUsed']?.toString() ?? '0';
+        final gasPriceStr = json['gasPrice']?.toString() ?? '0';
 
         final gasUsed = BigInt.tryParse(gasUsedStr) ?? BigInt.zero;
         final gasPrice = BigInt.tryParse(gasPriceStr) ?? BigInt.zero;
@@ -201,49 +198,42 @@ class Transaction {
         final feeBigInt = gasUsed * gasPrice;
         fee = feeBigInt / BigInt.from(10).pow(18);
       } catch (e) {
-        print('⚠️ Error calculating fee: $e');
+        print('⚠️ Error calculating v2 fee: $e');
+      }
+
+      // Check transaction status - v2 has txreceipt_status field
+      final isError = json['isError']?.toString() == '1';
+      final txReceiptStatus = json['txreceipt_status']?.toString() ?? '1';
+
+      TransactionStatus status;
+      if (isError || txReceiptStatus == '0') {
+        status = TransactionStatus.failed;
+      } else if (confirmations == 0) {
+        status = TransactionStatus.pending;
+      } else if (confirmations < AppConstants.ethConfirmations) {
+        status = TransactionStatus.confirming;
+      } else {
+        status = TransactionStatus.confirmed;
       }
 
       final isIncoming = to.toLowerCase() == myAddress.toLowerCase();
 
       return Transaction(
         hash: hash,
-        coinType: coinType,
+        coinType: CoinType.eth,
         from: from,
         to: to,
         amount: amount.toDouble(),
         timestamp: timestamp,
         confirmations: confirmations,
         fee: fee,
-        status: _getStatus(confirmations, coinType),
+        status: status,
         isIncoming: isIncoming,
       );
     } catch (e) {
-      print('❌ Error parsing V2 transaction: $e');
+      print('❌ Error parsing Etherscan v2 transaction: $e');
+      print('Transaction data: $json');
       rethrow;
-    }
-  }
-
-  static double _parseAmount(Map<String, dynamic> json, CoinType coinType) {
-    try {
-      if (coinType == CoinType.btc) {
-        // For Bitcoin, sum all outputs (simplified)
-        final outputs = json['outputs'] as List? ?? [];
-        int totalSatoshis = 0;
-        for (var output in outputs) {
-          totalSatoshis += (output['value'] ?? 0) as int;
-        }
-        return totalSatoshis / 100000000.0;
-      } else if (coinType == CoinType.eth) {
-        String wei = json['value']?.toString() ?? '0';
-        return double.parse(wei) / 1e18;
-      } else {
-        String attoFil = json['value']?.toString() ?? '0';
-        return double.parse(attoFil) / 1e18;
-      }
-    } catch (e) {
-      print('⚠️ Error parsing amount: $e');
-      return 0.0;
     }
   }
 
@@ -260,6 +250,10 @@ class Transaction {
         } else if (timestamp is String) {
           return DateTime.parse(timestamp);
         }
+      } else if (json['timeStamp'] != null) {
+        // v2 API uses timeStamp
+        final ts = int.tryParse(json['timeStamp'].toString()) ?? 0;
+        return DateTime.fromMillisecondsSinceEpoch(ts * 1000);
       }
     } catch (e) {
       print('⚠️ Error parsing timestamp: $e');
@@ -292,31 +286,6 @@ class Transaction {
     if (confirmations == 0) return TransactionStatus.pending;
     if (confirmations >= required) return TransactionStatus.confirmed;
     return TransactionStatus.confirming;
-  }
-
-  static bool _isIncoming(Map<String, dynamic> json, String myAddress) {
-    try {
-      String to = json['to']?.toString() ?? '';
-
-      // Check outputs for Bitcoin
-      if (json['outputs'] != null) {
-        final outputs = json['outputs'] as List;
-        for (var output in outputs) {
-          final addresses = output['addresses'] as List? ?? [];
-          for (var addr in addresses) {
-            if (addr.toString().toLowerCase() == myAddress.toLowerCase()) {
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-
-      return to.toLowerCase() == myAddress.toLowerCase();
-    } catch (e) {
-      print('⚠️ Error checking if incoming: $e');
-      return false;
-    }
   }
 }
 
