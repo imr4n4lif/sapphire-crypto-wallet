@@ -33,8 +33,8 @@ class AppConstants {
   static const String btcTestnetApi = 'https://api.blockcypher.com/v1/btc/test3'; // testnet4
 
   // Etherscan API for transaction history (V2)
-  static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/v2/api';
-  static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/v2/api';
+  static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/api';
+  static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/api';
 
   // Legacy V1 endpoints (deprecated)
   static const String ethMainnetEtherscan = 'https://api.etherscan.io/api';
