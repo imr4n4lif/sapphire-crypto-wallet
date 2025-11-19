@@ -434,10 +434,10 @@ class _WalletMenuSheet extends StatelessWidget {
                     IconButton(
                       icon: Container(
                         padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          shape: BoxShape.circle,
-                        ),
+                        // decoration: BoxDecoration(
+                        //   color: Theme.of(context).colorScheme.primaryContainer,
+                        //   shape: BoxShape.circle,
+                        // ),
                         child: Icon(
                           Icons.add,
                           color: Theme.of(context).colorScheme.primary,
@@ -540,10 +540,10 @@ class _WalletMenuSheet extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  shape: BoxShape.circle,
-                ),
+                // decoration: BoxDecoration(
+                //   color: Theme.of(context).colorScheme.primaryContainer,
+                //   shape: BoxShape.circle,
+                // ),
                 child: Icon(
                   Icons.account_balance_wallet,
                   size: 48,

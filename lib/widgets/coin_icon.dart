@@ -33,10 +33,10 @@ class CoinIcon extends StatelessWidget {
       _getSvgPath(),
       width: size,
       height: size,
-      colorFilter: ColorFilter.mode(
-        iconColor,
-        BlendMode.srcIn,
-      ),
+      // colorFilter: ColorFilter.mode(
+      //   iconColor,
+      //   BlendMode.srcIn,
+      // ),
     );
   }
 }

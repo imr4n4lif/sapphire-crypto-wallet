@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-
+//Theme 1
   // // Light Theme Colors
   // static const Color primaryLight = Color(0xFF6C63FF);
   // static const Color secondaryLight = Color(0xFF4CAF50);
@@ -21,25 +21,42 @@ class AppTheme {
   // static const Color successDark = Color(0xFF66BB6A);
   // static const Color warningDark = Color(0xFFFFB74D);
 
+  //Theme 2
   // Light Theme Colors
-  static const Color primaryLight = Color(0xFF3A7BFF);      // Soft bright blue
-  static const Color secondaryLight = Color(0xFF2B2D30);    // Aqua/teal accent
-  static const Color backgroundLight = Color(0xFFF2F6FA);   // Gentle bluish-white
-  static const Color surfaceLight = Color(0xFFFFFFFF);      // Clean white surfaces
-  static const Color errorLight = Color(0xFFDC3545);        // Modern red
+  // static const Color primaryLight = Color(0xFF3A7BFF);      // Soft bright blue
+  // static const Color secondaryLight = Color(0xFF2B2D30);    // Aqua/teal accent
+  // static const Color backgroundLight = Color(0xFFF2F6FA);   // Gentle bluish-white
+  // static const Color surfaceLight = Color(0xFFFFFFFF);      // Clean white surfaces
+  // static const Color errorLight = Color(0xFFDC3545);        // Modern red
+  // static const Color successLight = Color(0xFF2ECC71);      // Fresh green
+  // static const Color warningLight = Color(0xFFFFC75F);      // Warm but soft yellow
+  //
+  //
+  // // Dark Theme Colors
+  // static const Color primaryDark = Color(0xFF5EA0FF);       // Vibrant soft blue
+  // static const Color secondaryDark = Color(0xFF00D4FF);     // Neon aqua accent
+  // static const Color backgroundDark = Color(0xFF0D1117);    // GitHub-style deep navy
+  // static const Color surfaceDark = Color(0xFF161B22);       // Slightly lighter navy
+  // static const Color errorDark = Color(0xFFFF6B6B);         // Softened red
+  // static const Color successDark = Color(0xFF28D98B);       // Neon green
+  // static const Color warningDark = Color(0xFFFFD580);       // Softer amber
+
+//Theme 3
+  static const Color primaryLight = Color(0xFF2979FF);      // Modern deep blue
+  static const Color secondaryLight = Color(0xFF00A8E8);    // Aqua accent
+  static const Color backgroundLight = Color(0xFFF3F7FF);   // Gentle cool white-blue
+  static const Color surfaceLight = Color(0xFFFFFFFF);      // Clean white card surfaces
+  static const Color errorLight = Color(0xFFE04855);        // Softer, modern red
   static const Color successLight = Color(0xFF2ECC71);      // Fresh green
-  static const Color warningLight = Color(0xFFFFC75F);      // Warm but soft yellow
+  static const Color warningLight = Color(0xFFFFC766);      // Warm pastel yellow
 
-
-  // Dark Theme Colors
-  static const Color primaryDark = Color(0xFF5EA0FF);       // Vibrant soft blue
-  static const Color secondaryDark = Color(0xFF00D4FF);     // Neon aqua accent
-  static const Color backgroundDark = Color(0xFF0D1117);    // GitHub-style deep navy
-  static const Color surfaceDark = Color(0xFF161B22);       // Slightly lighter navy
-  static const Color errorDark = Color(0xFFFF6B6B);         // Softened red
-  static const Color successDark = Color(0xFF28D98B);       // Neon green
-  static const Color warningDark = Color(0xFFFFD580);       // Softer amber
-
+  static const Color primaryDark = Color(0xFF5EA0FF);       // Smooth light blue
+  static const Color secondaryDark = Color(0xFF00D1FF);     // Bright aqua highlight
+  static const Color backgroundDark = Color(0xFF0B1220);    // Deep bluish navy
+  static const Color surfaceDark = Color(0xFF121A2A);       // Darker card surface
+  static const Color errorDark = Color(0xFFFF6B6B);         // Friendly red
+  static const Color successDark = Color(0xFF2EDFA3);       // Bright cool green
+  static const Color warningDark = Color(0xFFFFD48A);       // Soft amber
 
   static ThemeData get lightTheme {
     return ThemeData(
