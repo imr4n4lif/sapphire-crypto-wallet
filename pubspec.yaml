@@ -65,4 +65,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/icons/logo.svg
+    - assets/icons/bitcoin.svg
+    - assets/icons/ethereum.svg
+    - assets/icons/filecoin.svg
     - .env

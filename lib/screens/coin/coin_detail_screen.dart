@@ -8,6 +8,7 @@ import '../../core/services/price_service.dart';
 import '../../models/wallet.dart';
 import 'send_screen.dart';
 import 'receive_screen.dart';
+import '../../widgets/coin_icon.dart';
 
 enum TimelineOption { day, week, month, threeMonths, year }
 
@@ -43,14 +44,24 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
   Future<void> _loadPriceHistory() async {
     setState(() => _loadingHistory = true);
 
-    final days = _getTimelineDays(_selectedTimeline);
-    final history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
+    try {
+      final days = _getTimelineDays(_selectedTimeline);
+      final history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
 
-    if (mounted) {
-      setState(() {
-        _priceHistory = history;
-        _loadingHistory = false;
-      });
+      if (mounted) {
+        setState(() {
+          _priceHistory = history;
+          _loadingHistory = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading price history: $e');
+      if (mounted) {
+        setState(() {
+          _priceHistory = [];
+          _loadingHistory = false;
+        });
+      }
     }
   }
 
@@ -171,10 +182,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
       ),
       child: Column(
         children: [
-          Text(
-            _coinInfo.icon,
-            style: const TextStyle(fontSize: 48, color: Colors.white),
-          ),
+          CoinIcon(coinType: widget.coinType, size: 48),
           const SizedBox(height: 16),
           Text(
             '${balanceValue.toStringAsFixed(8)} ${_coinInfo.symbol}',
@@ -274,9 +282,20 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
                   ? const Center(child: CircularProgressIndicator())
                   : _priceHistory.isEmpty
                   ? Center(
-                child: Text(
-                  'No price data available',
-                  style: Theme.of(context).textTheme.bodySmall,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.show_chart,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No price data available',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                 ),
               )
                   : LineChart(
