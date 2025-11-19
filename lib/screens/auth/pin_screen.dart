@@ -24,15 +24,19 @@ class _PinScreenState extends State<PinScreen> {
   String _confirmPin = '';
   bool _isConfirming = false;
   String _error = '';
-  bool _hasTriedBiometric = false; // Track if we've already tried biometric
+  bool _hasTriedBiometric = false;
 
   @override
   void initState() {
     super.initState();
-    // FIXED: Try biometric authentication automatically when entering verify mode
+    // Try biometric authentication automatically when entering verify mode
     if (widget.mode == PinScreenMode.verify) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _tryBiometricAuth();
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        // Add delay to ensure screen is fully rendered
+        await Future.delayed(const Duration(milliseconds: 800));
+        if (mounted) {
+          _tryBiometricAuth();
+        }
       });
     }
   }
@@ -46,7 +50,7 @@ class _PinScreenState extends State<PinScreen> {
     return 'Enter PIN';
   }
 
-  // FIXED: Automatic biometric authentication with debug logging
+  // Automatic biometric authentication with improved handling
   Future<void> _tryBiometricAuth() async {
     if (_hasTriedBiometric) {
       print('🔐 Already tried biometric auth, skipping');
@@ -72,26 +76,28 @@ class _PinScreenState extends State<PinScreen> {
       return;
     }
 
-    // Small delay to let the screen render
-    await Future.delayed(const Duration(milliseconds: 500));
-
     if (!mounted) return;
 
     print('🔐 Attempting biometric authentication...');
-    final authenticated = await authProvider.authenticateWithBiometric();
-    print('🔐 Biometric result: $authenticated');
 
-    if (authenticated && mounted) {
-      print('✅ Biometric authentication successful');
-      if (widget.onSuccess != null) {
-        widget.onSuccess!();
+    try {
+      final authenticated = await authProvider.authenticateWithBiometric();
+      print('🔐 Biometric result: $authenticated');
+
+      if (authenticated && mounted) {
+        print('✅ Biometric authentication successful');
+        if (widget.onSuccess != null) {
+          widget.onSuccess!();
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomeScreen()),
+          );
+        }
       } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
-        );
+        print('❌ Biometric authentication failed or cancelled');
       }
-    } else {
-      print('❌ Biometric authentication failed or cancelled');
+    } catch (e) {
+      print('❌ Biometric authentication error: $e');
     }
   }
 

@@ -26,6 +26,7 @@ class WalletProvider with ChangeNotifier {
   bool _isRefreshing = false;
   Map<CoinType, CoinBalance> _balances = {};
   Map<CoinType, List<Transaction>> _transactions = {};
+  Map<CoinType, String> _lastKnownTxHash = {}; // Track last known transaction
 
   Timer? _autoRefreshTimer;
   static const Duration _refreshInterval = Duration(minutes: 5);
@@ -65,20 +66,15 @@ class WalletProvider with ChangeNotifier {
       _isMainnet = await _storage.readBool(AppConstants.keyIsMainnet, defaultValue: true);
       _blockchainService.initialize(_isMainnet);
 
-      // Load all wallets
       await _loadAllWallets();
-
-      // Load current wallet ID
       _currentWalletId = await _storage.readString('current_wallet_id');
 
       if (_allWallets.isNotEmpty) {
-        // If no current wallet set, use first one
         if (_currentWalletId == null) {
           _currentWalletId = _allWallets.first['id'] as String;
           await _storage.saveString('current_wallet_id', _currentWalletId!);
         }
 
-        // Load current wallet
         await _loadCurrentWallet();
         await refreshBalances();
         await refreshTransactions();
@@ -131,13 +127,10 @@ class WalletProvider with ChangeNotifier {
       final mnemonic = _walletService.generateMnemonic();
       final walletData = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
 
-      // Generate unique ID
       final walletId = DateTime.now().millisecondsSinceEpoch.toString();
 
-      // Save mnemonic
       await _storage.saveSecure('mnemonic_$walletId', mnemonic);
 
-      // Add to wallets list
       _allWallets.add({
         'id': walletId,
         'name': name,
@@ -148,8 +141,6 @@ class WalletProvider with ChangeNotifier {
       });
 
       await _saveAllWallets();
-
-      // Switch to new wallet
       await switchWallet(walletId);
 
       return mnemonic;
@@ -168,14 +159,10 @@ class WalletProvider with ChangeNotifier {
       }
 
       final walletData = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
-
-      // Generate unique ID
       final walletId = DateTime.now().millisecondsSinceEpoch.toString();
 
-      // Save mnemonic
       await _storage.saveSecure('mnemonic_$walletId', mnemonic);
 
-      // Add to wallets list
       _allWallets.add({
         'id': walletId,
         'name': name,
@@ -186,8 +173,6 @@ class WalletProvider with ChangeNotifier {
       });
 
       await _saveAllWallets();
-
-      // Switch to imported wallet
       await switchWallet(walletId);
 
       print('✅ Wallet imported successfully');
@@ -213,19 +198,14 @@ class WalletProvider with ChangeNotifier {
   Future<void> deleteWalletById(String walletId) async {
     print('🗑️ Deleting wallet: $walletId');
 
-    // Don't delete if it's the only wallet
     if (_allWallets.length == 1) {
       throw Exception('Cannot delete the only wallet');
     }
 
-    // Delete mnemonic
     await _storage.deleteSecure('mnemonic_$walletId');
-
-    // Remove from list
     _allWallets.removeWhere((w) => w['id'] == walletId);
     await _saveAllWallets();
 
-    // If deleted current wallet, switch to first available
     if (_currentWalletId == walletId) {
       await switchWallet(_allWallets.first['id'] as String);
     }
@@ -351,7 +331,6 @@ class WalletProvider with ChangeNotifier {
     _stopAutoRefresh();
     _blockchainService.clearCache();
 
-    // Delete all wallets
     for (var wallet in _allWallets) {
       await _storage.deleteSecure('mnemonic_${wallet['id']}');
     }
@@ -365,6 +344,7 @@ class WalletProvider with ChangeNotifier {
     _currentWalletId = null;
     _balances.clear();
     _transactions.clear();
+    _lastKnownTxHash.clear();
     notifyListeners();
 
     print('✅ Wallet deleted');
@@ -409,21 +389,16 @@ class WalletProvider with ChangeNotifier {
     try {
       print('🔄 Refreshing balances...');
 
-      // Fetch prices first
       print('💲 Fetching crypto prices...');
       final prices = await _priceService.fetchAllPrices();
 
-      // Debug price fetching
       for (final coinType in CoinType.values) {
         final price = prices[coinType];
         if (price != null) {
           print('💲 ${coinType.name.toUpperCase()}: \$${price.price.toStringAsFixed(2)} (${price.change24h >= 0 ? '+' : ''}${price.change24h.toStringAsFixed(2)}%)');
-        } else {
-          print('⚠️ Failed to fetch price for ${coinType.name.toUpperCase()}');
         }
       }
 
-      // Fetch balances with delays
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -432,7 +407,6 @@ class WalletProvider with ChangeNotifier {
 
       final filBalance = await _blockchainService.getFilecoinBalance(_wallet!.filAddress);
 
-      // Calculate USD values
       final btcPrice = prices[CoinType.btc]?.price ?? 0.0;
       final ethPrice = prices[CoinType.eth]?.price ?? 0.0;
       final filPrice = prices[CoinType.fil]?.price ?? 0.0;
@@ -446,7 +420,6 @@ class WalletProvider with ChangeNotifier {
       print('   ETH: $ethBalance × \$$ethPrice = \$$ethUsd');
       print('   FIL: $filBalance × \$$filPrice = \$$filUsd');
 
-      // Update balances
       _balances = {
         CoinType.btc: CoinBalance(
           coinType: CoinType.btc,
@@ -480,6 +453,32 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
+  // Check for new incoming transactions and show notifications
+  void _checkForNewTransactions(CoinType coinType, List<Transaction> newTxs) {
+    if (newTxs.isEmpty) return;
+
+    final latestTx = newTxs.first;
+    final lastKnownHash = _lastKnownTxHash[coinType];
+
+    // If we have a last known hash and the latest is different and incoming
+    if (lastKnownHash != null &&
+        lastKnownHash != latestTx.hash &&
+        latestTx.isIncoming) {
+
+      print('🔔 New incoming transaction detected for ${coinType.name}');
+
+      // Show notification
+      _notificationService.showTransactionReceived(
+        coinSymbol: CoinInfo.allCoins.firstWhere((c) => c.type == coinType).symbol,
+        amount: latestTx.amount,
+        txHash: latestTx.hash,
+      );
+    }
+
+    // Update last known hash
+    _lastKnownTxHash[coinType] = latestTx.hash;
+  }
+
   Future<void> refreshTransactions() async {
     if (_wallet == null) {
       print('⚠️ No wallet to refresh transactions');
@@ -498,14 +497,22 @@ class WalletProvider with ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 1000));
 
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      final filTxs = await _blockchainService.getFilecoinTransactions(_wallet!.filAddress);
+
+      // Check for new incoming transactions
+      _checkForNewTransactions(CoinType.btc, btcTxs);
+      _checkForNewTransactions(CoinType.eth, ethTxs);
+      _checkForNewTransactions(CoinType.fil, filTxs);
 
       _transactions = {
         CoinType.btc: btcTxs,
         CoinType.eth: ethTxs,
-        CoinType.fil: <Transaction>[],
+        CoinType.fil: filTxs,
       };
 
-      print('✅ Transactions refreshed - BTC: ${btcTxs.length}, ETH: ${ethTxs.length}');
+      print('✅ Transactions refreshed - BTC: ${btcTxs.length}, ETH: ${ethTxs.length}, FIL: ${filTxs.length}');
       notifyListeners();
     } catch (e) {
       print('❌ Error refreshing transactions: $e');
@@ -540,7 +547,13 @@ class WalletProvider with ChangeNotifier {
           );
           break;
         case CoinType.fil:
-          throw UnimplementedError('Filecoin sending not yet implemented');
+          txHash = await _blockchainService.sendFilecoin(
+            fromAddress: _wallet!.filAddress,
+            toAddress: toAddress,
+            privateKey: _wallet!.filPrivateKey,
+            amount: amount,
+          );
+          break;
       }
 
       print('✅ Transaction sent: $txHash');

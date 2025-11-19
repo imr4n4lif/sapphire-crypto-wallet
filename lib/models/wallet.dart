@@ -8,7 +8,7 @@ class WalletData {
   final String ethPrivateKey;
   final String filAddress;
   final String filPrivateKey;
-  final String? name; // For multi-wallet support
+  final String? name;
 
   WalletData({
     required this.mnemonic,
@@ -96,15 +96,13 @@ class Transaction {
     required this.isIncoming,
   });
 
-  // Bitcoin transaction parsing (unchanged)
+  // Bitcoin transaction parsing
   factory Transaction.fromJson(Map<String, dynamic> json, CoinType coinType, String myAddress) {
     try {
-      // Bitcoin transaction parsing
       if (coinType == CoinType.btc) {
         final inputs = json['inputs'] as List? ?? [];
         final outputs = json['outputs'] as List? ?? [];
 
-        // Get sender address (from first input)
         String fromAddress = '';
         if (inputs.isNotEmpty && inputs[0]['addresses'] != null) {
           final addresses = inputs[0]['addresses'] as List;
@@ -113,7 +111,6 @@ class Transaction {
           }
         }
 
-        // Get recipient address and amount
         String toAddress = '';
         double amount = 0.0;
 
@@ -121,17 +118,15 @@ class Transaction {
           final addresses = output['addresses'] as List? ?? [];
           if (addresses.isNotEmpty) {
             final addr = addresses[0].toString();
-            // Find the output that's not a change address
             if (addr != fromAddress) {
               toAddress = addr;
               final value = output['value'] ?? 0;
-              amount = value / 100000000.0; // Convert satoshis to BTC
+              amount = value / 100000000.0;
               break;
             }
           }
         }
 
-        // If we couldn't determine recipient, use first output
         if (toAddress.isEmpty && outputs.isNotEmpty) {
           final addresses = outputs[0]['addresses'] as List? ?? [];
           if (addresses.isNotEmpty) {
@@ -155,7 +150,6 @@ class Transaction {
         );
       }
 
-      // For other coins, shouldn't reach here
       throw Exception('Unsupported coin type for this parser');
     } catch (e) {
       print('❌ Error parsing transaction: $e');
@@ -163,30 +157,28 @@ class Transaction {
     }
   }
 
-  // Etherscan v2 API Parser - FIXED for new response format
+  // Etherscan V2 API Parser - FULLY UPDATED
   factory Transaction.fromEtherscanV2(Map<String, dynamic> json, String myAddress) {
     try {
-      // Etherscan v2 uses different field names
       final hash = json['hash']?.toString() ?? '';
       final from = json['from']?.toString() ?? '';
       final to = json['to']?.toString() ?? '';
 
-      // Parse value (in wei) - handle both string and number formats
+      // Parse value (in wei)
       final valueStr = json['value']?.toString() ?? '0';
       final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
       final amount = valueBigInt / BigInt.from(10).pow(18);
 
-      // Parse timestamp - v2 returns unix timestamp as string
+      // Parse timestamp
       final timeStampStr = json['timeStamp']?.toString() ?? '0';
       final ts = int.tryParse(timeStampStr) ?? 0;
       final timestamp = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
 
-      // Parse block number to calculate confirmations (if current block is available)
+      // Parse confirmations
       final blockNumber = int.tryParse(json['blockNumber']?.toString() ?? '0') ?? 0;
-      // We'll default to confirmed if blockNumber exists
       final confirmations = blockNumber > 0 ? 15 : 0;
 
-      // Calculate gas fee - v2 API provides gasUsed and gasPrice
+      // Calculate gas fee
       double fee = 0.0;
       try {
         final gasUsedStr = json['gasUsed']?.toString() ?? '0';
@@ -198,10 +190,10 @@ class Transaction {
         final feeBigInt = gasUsed * gasPrice;
         fee = feeBigInt / BigInt.from(10).pow(18);
       } catch (e) {
-        print('⚠️ Error calculating v2 fee: $e');
+        print('⚠️ Error calculating fee: $e');
       }
 
-      // Check transaction status - v2 has txreceipt_status field
+      // Check transaction status
       final isError = json['isError']?.toString() == '1';
       final txReceiptStatus = json['txreceipt_status']?.toString() ?? '1';
 
@@ -231,8 +223,63 @@ class Transaction {
         isIncoming: isIncoming,
       );
     } catch (e) {
-      print('❌ Error parsing Etherscan v2 transaction: $e');
-      print('Transaction data: $json');
+      print('❌ Error parsing Etherscan V2 transaction: $e');
+      rethrow;
+    }
+  }
+
+  // Filecoin transaction parsing - NEW
+  factory Transaction.fromFilecoin(Map<String, dynamic> json, String myAddress) {
+    try {
+      final message = json['Message'] ?? json;
+
+      // Parse CID
+      String hash = '';
+      if (json['Cid'] != null) {
+        hash = json['Cid'] is Map ? (json['Cid']['/'] ?? '') : json['Cid'].toString();
+      } else if (json['CID'] != null) {
+        hash = json['CID'] is Map ? (json['CID']['/'] ?? '') : json['CID'].toString();
+      }
+
+      // Parse value (from attoFIL to FIL)
+      double amount = 0.0;
+      try {
+        final valueStr = message['Value']?.toString() ?? '0';
+        final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
+        amount = (valueBigInt / BigInt.from(10).pow(18)).toDouble();
+      } catch (e) {
+        print('⚠️ Error parsing Filecoin amount: $e');
+      }
+
+      // Parse addresses
+      final from = message['From']?.toString() ?? '';
+      final to = message['To']?.toString() ?? '';
+
+      // Parse height for timestamp approximation (10 blocks per 5 minutes)
+      int height = 0;
+      if (json['Height'] != null) {
+        height = int.tryParse(json['Height'].toString()) ?? 0;
+      }
+
+      // Approximate timestamp (Filecoin epoch time)
+      final timestamp = height > 0
+          ? DateTime.now().subtract(Duration(minutes: (height * 30) ~/ 60))
+          : DateTime.now();
+
+      return Transaction(
+        hash: hash,
+        coinType: CoinType.fil,
+        from: from,
+        to: to,
+        amount: amount,
+        timestamp: timestamp,
+        confirmations: AppConstants.filConfirmations,
+        fee: 0.0,
+        status: TransactionStatus.confirmed,
+        isIncoming: to.toLowerCase() == myAddress.toLowerCase(),
+      );
+    } catch (e) {
+      print('❌ Error parsing Filecoin transaction: $e');
       rethrow;
     }
   }
@@ -251,7 +298,6 @@ class Transaction {
           return DateTime.parse(timestamp);
         }
       } else if (json['timeStamp'] != null) {
-        // v2 API uses timeStamp
         final ts = int.tryParse(json['timeStamp'].toString()) ?? 0;
         return DateTime.fromMillisecondsSinceEpoch(ts * 1000);
       }

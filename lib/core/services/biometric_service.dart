@@ -44,7 +44,7 @@ class BiometricService {
     }
   }
 
-  // Authenticate with biometrics
+  // Authenticate with biometrics - IMPROVED
   Future<bool> authenticate({
     String reason = 'Please authenticate to access your wallet',
   }) async {
@@ -52,8 +52,7 @@ class BiometricService {
       print('🔐 Starting biometric authentication...');
 
       final bool canAuthenticateWithBiometrics = await canCheckBiometrics();
-      final bool canAuthenticate = canAuthenticateWithBiometrics ||
-          await _localAuth.isDeviceSupported();
+      final bool canAuthenticate = canAuthenticateWithBiometrics || await _localAuth.isDeviceSupported();
 
       print('🔐 Can authenticate: $canAuthenticate');
 
@@ -75,7 +74,9 @@ class BiometricService {
         localizedReason: reason,
         options: const AuthenticationOptions(
           stickyAuth: true,
-          biometricOnly: false, // Allow PIN fallback
+          biometricOnly: true, // Changed to true for better security
+          useErrorDialogs: true,
+          sensitiveTransaction: true,
         ),
       );
 
@@ -83,13 +84,23 @@ class BiometricService {
       return result;
     } on PlatformException catch (e) {
       print('❌ Biometric authentication error: ${e.code} - ${e.message}');
+
       if (e.code == 'NotAvailable') {
         print('ℹ️ Biometric authentication not available');
       } else if (e.code == 'NotEnrolled') {
         print('ℹ️ No biometrics enrolled');
       } else if (e.code == 'LockedOut') {
         print('ℹ️ Biometric authentication locked out');
+      } else if (e.code == 'PermanentlyLockedOut') {
+        print('ℹ️ Biometric authentication permanently locked out');
+      } else if (e.code == 'UserCancel' || e.code == 'auth_in_progress') {
+        print('ℹ️ User cancelled authentication');
+      } else if (e.code == 'PasscodeNotSet') {
+        print('ℹ️ Device passcode not set');
+      } else {
+        print('ℹ️ Other error: ${e.code}');
       }
+
       return false;
     } catch (e) {
       print('❌ Unexpected biometric error: $e');

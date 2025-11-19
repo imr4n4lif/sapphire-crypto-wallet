@@ -15,6 +15,7 @@ class BlockchainService {
   // Rate limiting
   DateTime? _lastBtcApiCall;
   DateTime? _lastEthApiCall;
+  DateTime? _lastFilApiCall;
   final Duration _apiCallDelay = const Duration(seconds: 2);
 
   // Cache for API responses
@@ -143,8 +144,7 @@ class BlockchainService {
           return balance;
         }
       } else if (response.statusCode == 500) {
-        print('⚠️ FIL RPC server error (500). The address might not be valid for this network.');
-        print('ℹ️ Note: Filecoin testnet addresses may not work with all RPC endpoints');
+        print('⚠️ FIL RPC server error (500)');
         return 0.0;
       } else {
         print('⚠️ Failed to fetch FIL balance: ${response.statusCode}');
@@ -189,7 +189,6 @@ class BlockchainService {
         }).whereType<Transaction>().toList();
       } else if (response.statusCode == 429) {
         print('⚠️ BTC transactions API rate limited (429)');
-        print('ℹ️ Please wait a few minutes before refreshing');
         return <Transaction>[];
       } else {
         print('⚠️ Failed to fetch BTC transactions: ${response.statusCode}');
@@ -201,7 +200,7 @@ class BlockchainService {
     }
   }
 
-  // Get Ethereum transactions using Etherscan v2 API - FIXED
+  // Get Ethereum transactions using Etherscan V2 API - FULLY FIXED
   Future<List<Transaction>> getEthereumTransactions(String address) async {
     try {
       final apiKey = AppConstants.etherscanApiKey;
@@ -216,15 +215,13 @@ class BlockchainService {
       await _respectRateLimit(_lastEthApiCall);
       _lastEthApiCall = DateTime.now();
 
-      // Etherscan standard API endpoint (v2 migration in progress)
-      // For now, use standard endpoint which still works
-      final baseUrl = _isMainnet
-          ? 'https://api.etherscan.io/api'
-          : 'https://api-sepolia.etherscan.io/api';
+      // Etherscan V2 API endpoint with chainid parameter
+      final chainId = _isMainnet ? 1 : 11155111; // Mainnet: 1, Sepolia: 11155111
+      final baseUrl = 'https://api.etherscan.io/v2/api';
 
-      final url = '$baseUrl?module=account&action=txlist&address=$address&startblock=0&endblock=99999999&page=1&offset=20&sort=desc&apikey=$apiKey';
+      final url = '$baseUrl?chainid=$chainId&module=account&action=txlist&address=$address&startblock=0&endblock=99999999&page=1&offset=20&sort=desc&apikey=$apiKey';
 
-      print('📡 Fetching ETH transactions for: $address (Etherscan API)');
+      print('📡 Fetching ETH transactions for: $address (Etherscan V2 API)');
 
       final response = await http.get(Uri.parse(url)).timeout(
         const Duration(seconds: 15),
@@ -248,21 +245,12 @@ class BlockchainService {
         print('🔍 Etherscan Status: $status, Message: $message');
 
         if (status == '0') {
-          // Check if it's just no transactions
           if (message.toLowerCase().contains('no transactions found') ||
               message.toLowerCase().contains('no records found')) {
             print('ℹ️ No ETH transactions found for this address');
             return <Transaction>[];
           }
 
-          // Check for deprecation warning but still try to parse result
-          if (result is String && result.toLowerCase().contains('deprecated')) {
-            print('⚠️ Etherscan API deprecation warning: $result');
-            print('ℹ️ The API still works but may be updated in the future');
-            // Don't return here, the API might still return data
-          }
-
-          // Check for API key issues
           if (result is String) {
             final resultLower = result.toLowerCase();
             if (resultLower.contains('invalid api key') ||
@@ -274,20 +262,16 @@ class BlockchainService {
             }
           }
 
-          // Rate limit
           if (message.toLowerCase().contains('rate limit')) {
-            print('⚠️ Etherscan API rate limited. Wait a moment and try again');
+            print('⚠️ Etherscan API rate limited');
             return <Transaction>[];
           }
 
           print('⚠️ Etherscan API Error: $message');
-          if (result != null && result is String) {
-            print('   Details: $result');
-          }
           return <Transaction>[];
         }
 
-        // Success - parse transactions from v2 API
+        // Success - parse transactions from V2 API
         if (status == '1' && result != null) {
           if (result is! List) {
             print('⚠️ Result is not a list: ${result.runtimeType}');
@@ -308,7 +292,6 @@ class BlockchainService {
                 print('⚠️ Transaction is not a map: ${tx.runtimeType}');
                 return null;
               }
-              // Use standard parser - works with current API
               return Transaction.fromEtherscanV2(tx, address);
             } catch (e) {
               print('⚠️ Error parsing ETH transaction: $e');
@@ -317,11 +300,10 @@ class BlockchainService {
           }).whereType<Transaction>().toList();
         }
 
-        print('⚠️ Unexpected Etherscan v2 response format');
+        print('⚠️ Unexpected Etherscan V2 response format');
         return <Transaction>[];
       } else if (response.statusCode == 404) {
         print('⚠️ API endpoint not found (404)');
-        print('ℹ️ This usually means the API endpoint has changed');
         return <Transaction>[];
       } else {
         print('⚠️ Failed to fetch ETH transactions: ${response.statusCode}');
@@ -329,6 +311,66 @@ class BlockchainService {
       }
     } catch (e) {
       print('❌ Error fetching Ethereum transactions: $e');
+      return <Transaction>[];
+    }
+  }
+
+  // Get Filecoin transactions
+  Future<List<Transaction>> getFilecoinTransactions(String address) async {
+    try {
+      await _respectRateLimit(_lastFilApiCall);
+      _lastFilApiCall = DateTime.now();
+
+      final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
+
+      print('📡 Fetching FIL transactions for: $address');
+
+      // Query recent messages involving this address
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'jsonrpc': '2.0',
+          'method': 'Filecoin.StateListMessages',
+          'params': [{
+            'To': address,
+          }, null, 0],
+          'id': 1,
+        }),
+      ).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw Exception('Request timeout'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['error'] != null) {
+          print('⚠️ FIL RPC Error: ${data['error']['message']}');
+          return <Transaction>[];
+        }
+
+        final result = data['result'];
+        if (result != null && result is List) {
+          print('✅ Found ${result.length} FIL transactions');
+
+          return result.take(20).map((tx) {
+            try {
+              return Transaction.fromFilecoin(tx, address);
+            } catch (e) {
+              print('⚠️ Error parsing FIL transaction: $e');
+              return null;
+            }
+          }).whereType<Transaction>().toList();
+        }
+
+        print('ℹ️ No FIL transactions found');
+        return <Transaction>[];
+      }
+
+      return <Transaction>[];
+    } catch (e) {
+      print('❌ Error fetching Filecoin transactions: $e');
       return <Transaction>[];
     }
   }
@@ -453,6 +495,58 @@ class BlockchainService {
       }
 
       throw Exception(errorMsg);
+    }
+  }
+
+  // Send Filecoin
+  Future<String> sendFilecoin({
+    required String fromAddress,
+    required String toAddress,
+    required String privateKey,
+    required double amount,
+  }) async {
+    try {
+      final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
+
+      print('📤 Preparing Filecoin transaction...');
+
+      // Convert FIL to attoFIL
+      final amountAttoFil = (amount * BigInt.from(10).pow(18).toDouble()).toInt().toString();
+
+      // Get nonce
+      final nonceResponse = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'jsonrpc': '2.0',
+          'method': 'Filecoin.MpoolGetNonce',
+          'params': [fromAddress],
+          'id': 1,
+        }),
+      );
+
+      int nonce = 0;
+      if (nonceResponse.statusCode == 200) {
+        final nonceData = json.decode(nonceResponse.body);
+        nonce = nonceData['result'] ?? 0;
+      }
+
+      print('Nonce: $nonce');
+
+      // For production, this requires proper Filecoin message signing
+      throw UnimplementedError(
+          'Filecoin sending requires filecoin signing library.\n'
+              'For testnet: https://faucet.calibration.fildev.network/\n'
+              'For implementation: https://github.com/textileio/dart-filecoin\n\n'
+              'Message details:\n'
+              'From: $fromAddress\n'
+              'To: $toAddress\n'
+              'Amount: $amount FIL\n'
+              'Nonce: $nonce'
+      );
+    } catch (e) {
+      print('❌ Filecoin send error: $e');
+      rethrow;
     }
   }
 
