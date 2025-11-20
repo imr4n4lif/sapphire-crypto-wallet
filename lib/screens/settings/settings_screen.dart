@@ -15,100 +15,101 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
-      body: ListView(
-        children: [
+        appBar: AppBar(
+          title: const Text('Settings'),
+        ),
+        body: ListView(
+          children: [
           _buildSection(
-            context,
-            'Network',
-            [
-              _buildNetworkSwitch(context),
-            ],
-          ),
-          _buildSection(
-            context,
-            'Appearance',
-            [
-              _buildThemeSwitch(context),
-            ],
-          ),
-          _buildSection(
-            context,
-            'Security',
-            [
-              _buildBiometricSwitch(context),
-              _buildChangePinTile(context),
-            ],
-          ),
-          _buildSection(
-            context,
-            'Wallet',
-            [
-              _buildViewSeedPhraseTile(context),
-              _buildViewPrivateKeysTile(context),
-              _buildClearCacheTile(context),
-              _buildDeleteWalletTile(context),
-            ],
-          ),
-          _buildSection(
-            context,
-            'About',
-            [
-              ListTile(
-                leading: const Icon(Icons.info_outline),
-                title: const Text('Version'),
-                trailing: Text(
-                  AppConstants.appVersion,
-                  style: Theme.of(context).textTheme.bodySmall,
+          context,
+          'Network',
+          [
+            _buildNetworkSwitch(context),
+          ],
+        ),
+        _buildSection(
+          context,
+          'Appearance',
+          [
+            _buildThemeSwitch(context),
+          ],
+        ),
+        _buildSection(
+          context,
+          'Security',
+          [
+            _buildBiometricSwitch(context),
+            _buildChangePinTile(context),
+          ],
+        ),
+        _buildSection(
+          context,
+          'Wallet',
+          [
+            _buildEditWalletNameTile(context),
+            _buildViewSeedPhraseTile(context),
+            _buildViewPrivateKeysTile(context),
+            _buildClearCacheTile(context),
+            _buildDeleteWalletTile(context),
+          ],
+        ),
+            _buildSection(
+              context,
+              'About',
+              [
+                ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('Version'),
+                  trailing: Text(
+                    AppConstants.appVersion,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.speed),
-                title: const Text('API Rate Limits'),
-                subtitle: const Text('Auto-refresh every 5 minutes'),
-                trailing: const Icon(Icons.info_outline),
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Rate Limiting Info'),
-                      content: const SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('To avoid API rate limits:'),
-                            SizedBox(height: 8),
-                            Text('• Auto-refresh runs every 5 minutes'),
-                            Text('• Manual refresh has 2 second delays'),
-                            Text('• Cached data used when rate limited'),
-                            SizedBox(height: 12),
-                            Text('BlockCypher (Bitcoin):',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            Text('• 200 requests/hour (free tier)'),
-                            SizedBox(height: 8),
-                            Text('Etherscan (Ethereum):',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            Text('• 100,000 requests/day (free tier)'),
-                          ],
+                ListTile(
+                  leading: const Icon(Icons.speed),
+                  title: const Text('API Rate Limits'),
+                  subtitle: const Text('Auto-refresh every 5 minutes'),
+                  trailing: const Icon(Icons.info_outline),
+                  onTap: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Rate Limiting Info'),
+                        content: const SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('To avoid API rate limits:'),
+                              SizedBox(height: 8),
+                              Text('• Auto-refresh runs every 5 minutes'),
+                              Text('• Manual refresh has 2 second delays'),
+                              Text('• Cached data used when rate limited'),
+                              SizedBox(height: 12),
+                              Text('Mempool.space (Bitcoin):',
+                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text('• Uses testnet4 for testing'),
+                              SizedBox(height: 8),
+                              Text('Etherscan (Ethereum):',
+                                  style: TextStyle(fontWeight: FontWeight.bold)),
+                              Text('• 100,000 requests/day (free tier)'),
+                            ],
+                          ),
                         ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('OK'),
+                          ),
+                        ],
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ],
-      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
     );
   }
 
@@ -209,8 +210,41 @@ class SettingsScreen extends StatelessWidget {
             authProvider.biometricEnabled ? 'Enabled' : 'Disabled',
           ),
           value: authProvider.biometricEnabled,
-          onChanged: (value) {
-            authProvider.setBiometricEnabled(value);
+          onChanged: (value) async {
+            // Show loading indicator
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => const Center(
+                child: CircularProgressIndicator(),
+              ),
+            );
+
+            final success = await authProvider.setBiometricEnabled(value);
+
+            if (context.mounted) {
+              Navigator.pop(context); // Close loading dialog
+
+              if (!success && value) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to enable ${authProvider.biometricType}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              } else if (success) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      value
+                          ? '${authProvider.biometricType} enabled'
+                          : '${authProvider.biometricType} disabled',
+                    ),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            }
           },
         );
       },
@@ -227,6 +261,74 @@ class SettingsScreen extends StatelessWidget {
         showDialog(
           context: context,
           builder: (context) => _ChangePinDialog(),
+        );
+      },
+    );
+  }
+
+  Widget _buildEditWalletNameTile(BuildContext context) {
+    return Consumer<WalletProvider>(
+      builder: (context, walletProvider, _) {
+        return ListTile(
+          leading: const Icon(Icons.edit_outlined),
+          title: const Text('Edit Wallet Name'),
+          subtitle: Text(walletProvider.currentWalletName ?? 'No wallet selected'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () {
+            if (walletProvider.currentWalletId == null) return;
+
+            final controller = TextEditingController(
+              text: walletProvider.currentWalletName ?? '',
+            );
+
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Edit Wallet Name'),
+                content: TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'Wallet Name',
+                    hintText: 'Enter new wallet name',
+                  ),
+                  autofocus: true,
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final newName = controller.text.trim();
+                      if (newName.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Please enter a wallet name')),
+                        );
+                        return;
+                      }
+
+                      await walletProvider.updateWalletName(
+                        walletProvider.currentWalletId!,
+                        newName,
+                      );
+
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Wallet name updated'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Save'),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -306,18 +408,18 @@ class SettingsScreen extends StatelessWidget {
     return ListTile(
       leading: Icon(Icons.delete_forever, color: Theme.of(context).colorScheme.error),
       title: Text(
-        'Delete Wallet',
+        'Delete All Wallets',
         style: TextStyle(color: Theme.of(context).colorScheme.error),
       ),
-      subtitle: const Text('Permanently delete your wallet'),
+      subtitle: const Text('Permanently delete all wallets'),
       trailing: const Icon(Icons.chevron_right),
       onTap: () async {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Delete Wallet'),
+            title: const Text('Delete All Wallets'),
             content: const Text(
-              'Are you sure you want to delete your wallet? Make sure you have backed up your seed phrase. This action cannot be undone.',
+              'Are you sure you want to delete all wallets? Make sure you have backed up all seed phrases. This action cannot be undone.',
             ),
             actions: [
               TextButton(
@@ -329,14 +431,22 @@ class SettingsScreen extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.error,
                 ),
-                child: const Text('Delete'),
+                child: const Text('Delete All'),
               ),
             ],
           ),
         );
 
         if (confirmed == true && context.mounted) {
+          // Show loading
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const Center(child: CircularProgressIndicator()),
+          );
+
           await context.read<WalletProvider>().deleteWallet();
+
           if (context.mounted) {
             Navigator.of(context).pushAndRemoveUntil(
               MaterialPageRoute(builder: (_) => const SplashScreen()),
@@ -359,6 +469,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   final _newPinController = TextEditingController();
   final _confirmPinController = TextEditingController();
   String? _error;
+  bool _isChanging = false;
 
   @override
   void dispose() {
@@ -379,6 +490,11 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
       return;
     }
 
+    setState(() {
+      _isChanging = true;
+      _error = null;
+    });
+
     try {
       final authProvider = context.read<AuthProvider>();
       await authProvider.changePin(_oldPinController.text, _newPinController.text);
@@ -386,11 +502,17 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PIN changed successfully')),
+          const SnackBar(
+            content: Text('PIN changed successfully'),
+            backgroundColor: Colors.green,
+          ),
         );
       }
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() {
+        _error = e.toString();
+        _isChanging = false;
+      });
     }
   }
 
@@ -415,6 +537,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
             keyboardType: TextInputType.number,
             obscureText: true,
             maxLength: 6,
+            enabled: !_isChanging,
           ),
           TextField(
             controller: _newPinController,
@@ -422,6 +545,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
             keyboardType: TextInputType.number,
             obscureText: true,
             maxLength: 6,
+            enabled: !_isChanging,
           ),
           TextField(
             controller: _confirmPinController,
@@ -429,17 +553,24 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
             keyboardType: TextInputType.number,
             obscureText: true,
             maxLength: 6,
+            enabled: !_isChanging,
           ),
         ],
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _isChanging ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
         ElevatedButton(
-          onPressed: _changePin,
-          child: const Text('Change'),
+          onPressed: _isChanging ? null : _changePin,
+          child: _isChanging
+              ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+              : const Text('Change'),
         ),
       ],
     );

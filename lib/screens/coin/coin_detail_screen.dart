@@ -8,6 +8,7 @@ import '../../core/services/price_service.dart';
 import '../../models/wallet.dart';
 import 'send_screen.dart';
 import 'receive_screen.dart';
+import 'transaction_detail_screen.dart';
 import '../../widgets/coin_icon.dart';
 
 enum TimelineOption { day, week, month, threeMonths, year }
@@ -253,7 +254,6 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 16),
-            // Timeline selector
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -403,61 +403,77 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: tx.isIncoming
-                    ? Colors.green.withOpacity(0.1)
-                    : Colors.red.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                tx.isIncoming ? Icons.arrow_downward : Icons.arrow_upward,
-                color: tx.isIncoming ? Colors.green : Colors.red,
-              ),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TransactionDetailScreen(transaction: tx),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: tx.isIncoming
+                      ? Colors.green.withOpacity(0.1)
+                      : Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  tx.isIncoming ? Icons.arrow_downward : Icons.arrow_upward,
+                  color: tx.isIncoming ? Colors.green : Colors.red,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tx.isIncoming ? 'Received' : 'Sent',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      dateFormat.format(tx.timestamp),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    Text(
+                      '${tx.confirmations} confirmations',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _getStatusColor(tx.status),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    tx.isIncoming ? 'Received' : 'Sent',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  Text(
-                    dateFormat.format(tx.timestamp),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  Text(
-                    '${tx.confirmations} confirmations',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: _getStatusColor(tx.status),
+                    '${tx.isIncoming ? '+' : '-'}${tx.amount.toStringAsFixed(8)}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: tx.isIncoming ? Colors.green : Colors.red,
                     ),
+                  ),
+                  Text(
+                    _coinInfo.symbol,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${tx.isIncoming ? '+' : '-'}${tx.amount.toStringAsFixed(8)}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: tx.isIncoming ? Colors.green : Colors.red,
-                  ),
-                ),
-                Text(
-                  _coinInfo.symbol,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ],
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                color: Colors.grey.shade400,
+              ),
+            ],
+          ),
         ),
       ),
     );

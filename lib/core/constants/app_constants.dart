@@ -28,17 +28,13 @@ class AppConstants {
   static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
   static String get ethTestnetRpc => 'https://sepolia.infura.io/v3/$infuraProjectId';
 
-  // Bitcoin (using BlockCypher API - supports testnet4)
-  static const String btcMainnetApi = 'https://api.blockcypher.com/v1/btc/main';
-  static const String btcTestnetApi = 'https://api.blockcypher.com/v1/btc/test3'; // testnet4
+  // Bitcoin (using mempool.space API for testnet4)
+  static const String btcMainnetApi = 'https://blockstream.info/api';
+  static const String btcTestnetApi = 'https://mempool.space/testnet4/api'; // testnet4
 
   // Etherscan API for transaction history (V2)
   static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/api';
   static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/api';
-
-  // Legacy V1 endpoints (deprecated)
-  static const String ethMainnetEtherscan = 'https://api.etherscan.io/api';
-  static const String ethTestnetEtherscan = 'https://api-sepolia.etherscan.io/api';
 
   // Filecoin (using public RPC)
   static const String filMainnetRpc = 'https://api.node.glif.io';

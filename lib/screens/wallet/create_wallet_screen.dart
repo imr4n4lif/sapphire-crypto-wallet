@@ -15,17 +15,35 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
   String? _mnemonic;
   bool _isCreating = false;
   bool _hasAcknowledged = false;
+  bool _showNameInput = true;
+  final _nameController = TextEditingController(text: 'Main Wallet');
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
 
   Future<void> _createWallet() async {
+    final walletName = _nameController.text.trim();
+
+    if (walletName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a wallet name')),
+      );
+      return;
+    }
+
     setState(() => _isCreating = true);
 
     try {
       final walletProvider = context.read<WalletProvider>();
-      final mnemonic = await walletProvider.createWallet();
+      final mnemonic = await walletProvider.createWallet(walletName);
 
       setState(() {
         _mnemonic = mnemonic;
         _isCreating = false;
+        _showNameInput = false;
       });
     } catch (e) {
       setState(() => _isCreating = false);
@@ -92,6 +110,22 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 40),
+
+          // Wallet Name Input
+          TextField(
+            controller: _nameController,
+            decoration: InputDecoration(
+              labelText: 'Wallet Name',
+              hintText: 'e.g., Main Wallet',
+              prefixIcon: const Icon(Icons.label_outline),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            enabled: !_isCreating,
+          ),
+
+          const SizedBox(height: 24),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(

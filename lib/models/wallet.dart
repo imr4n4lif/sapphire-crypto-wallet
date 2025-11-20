@@ -82,6 +82,8 @@ class Transaction {
   final double fee;
   final TransactionStatus status;
   final bool isIncoming;
+  final String? blockHash;
+  final int? blockHeight;
 
   Transaction({
     required this.hash,
@@ -94,91 +96,87 @@ class Transaction {
     required this.fee,
     required this.status,
     required this.isIncoming,
+    this.blockHash,
+    this.blockHeight,
   });
 
-  // Bitcoin transaction parsing
-  factory Transaction.fromJson(Map<String, dynamic> json, CoinType coinType, String myAddress) {
+  // Mempool.space Bitcoin transaction parser
+  factory Transaction.fromMempoolBitcoin(Map<String, dynamic> json, String myAddress) {
     try {
-      if (coinType == CoinType.btc) {
-        final inputs = json['inputs'] as List? ?? [];
-        final outputs = json['outputs'] as List? ?? [];
+      final txid = json['txid'] ?? '';
+      final vin = json['vin'] as List? ?? [];
+      final vout = json['vout'] as List? ?? [];
 
-        String fromAddress = '';
-        if (inputs.isNotEmpty && inputs[0]['addresses'] != null) {
-          final addresses = inputs[0]['addresses'] as List;
-          if (addresses.isNotEmpty) {
-            fromAddress = addresses[0].toString();
-          }
-        }
-
-        String toAddress = '';
-        double amount = 0.0;
-
-        for (var output in outputs) {
-          final addresses = output['addresses'] as List? ?? [];
-          if (addresses.isNotEmpty) {
-            final addr = addresses[0].toString();
-            if (addr != fromAddress) {
-              toAddress = addr;
-              final value = output['value'] ?? 0;
-              amount = value / 100000000.0;
-              break;
-            }
-          }
-        }
-
-        if (toAddress.isEmpty && outputs.isNotEmpty) {
-          final addresses = outputs[0]['addresses'] as List? ?? [];
-          if (addresses.isNotEmpty) {
-            toAddress = addresses[0].toString();
-            final value = outputs[0]['value'] ?? 0;
-            amount = value / 100000000.0;
-          }
-        }
-
-        return Transaction(
-          hash: json['hash'] ?? json['txid'] ?? '',
-          coinType: coinType,
-          from: fromAddress,
-          to: toAddress,
-          amount: amount,
-          timestamp: _parseTimestamp(json),
-          confirmations: json['confirmations'] ?? 0,
-          fee: _parseFee(json, coinType),
-          status: _getStatus(json['confirmations'] ?? 0, coinType),
-          isIncoming: toAddress.toLowerCase() == myAddress.toLowerCase(),
-        );
+      String fromAddress = '';
+      if (vin.isNotEmpty && vin[0]['prevout'] != null) {
+        fromAddress = vin[0]['prevout']['scriptpubkey_address'] ?? '';
       }
 
-      throw Exception('Unsupported coin type for this parser');
+      String toAddress = '';
+      double amount = 0.0;
+
+      for (var output in vout) {
+        final addr = output['scriptpubkey_address'] ?? '';
+        if (addr.isNotEmpty && addr != fromAddress) {
+          toAddress = addr;
+          amount = (output['value'] ?? 0) / 100000000.0;
+          break;
+        }
+      }
+
+      if (toAddress.isEmpty && vout.isNotEmpty) {
+        toAddress = vout[0]['scriptpubkey_address'] ?? '';
+        amount = (vout[0]['value'] ?? 0) / 100000000.0;
+      }
+
+      final fee = (json['fee'] ?? 0) / 100000000.0;
+      final confirmed = json['status']?['confirmed'] ?? false;
+      final blockHeight = json['status']?['block_height'];
+      final blockHash = json['status']?['block_hash'];
+      final blockTime = json['status']?['block_time'];
+
+      final timestamp = blockTime != null
+          ? DateTime.fromMillisecondsSinceEpoch(blockTime * 1000)
+          : DateTime.now();
+
+      return Transaction(
+        hash: txid,
+        coinType: CoinType.btc,
+        from: fromAddress,
+        to: toAddress,
+        amount: amount,
+        timestamp: timestamp,
+        confirmations: confirmed ? 6 : 0,
+        fee: fee,
+        status: confirmed ? TransactionStatus.confirmed : TransactionStatus.pending,
+        isIncoming: toAddress.toLowerCase() == myAddress.toLowerCase(),
+        blockHash: blockHash,
+        blockHeight: blockHeight,
+      );
     } catch (e) {
-      print('❌ Error parsing transaction: $e');
+      print('❌ Error parsing mempool Bitcoin transaction: $e');
       rethrow;
     }
   }
 
-  // Etherscan V2 API Parser - FULLY UPDATED
+  // Etherscan V2 API Parser
   factory Transaction.fromEtherscanV2(Map<String, dynamic> json, String myAddress) {
     try {
       final hash = json['hash']?.toString() ?? '';
       final from = json['from']?.toString() ?? '';
       final to = json['to']?.toString() ?? '';
 
-      // Parse value (in wei)
       final valueStr = json['value']?.toString() ?? '0';
       final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
       final amount = valueBigInt / BigInt.from(10).pow(18);
 
-      // Parse timestamp
       final timeStampStr = json['timeStamp']?.toString() ?? '0';
       final ts = int.tryParse(timeStampStr) ?? 0;
       final timestamp = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
 
-      // Parse confirmations
       final blockNumber = int.tryParse(json['blockNumber']?.toString() ?? '0') ?? 0;
       final confirmations = blockNumber > 0 ? 15 : 0;
 
-      // Calculate gas fee
       double fee = 0.0;
       try {
         final gasUsedStr = json['gasUsed']?.toString() ?? '0';
@@ -193,7 +191,6 @@ class Transaction {
         print('⚠️ Error calculating fee: $e');
       }
 
-      // Check transaction status
       final isError = json['isError']?.toString() == '1';
       final txReceiptStatus = json['txreceipt_status']?.toString() ?? '1';
 
@@ -221,6 +218,8 @@ class Transaction {
         fee: fee,
         status: status,
         isIncoming: isIncoming,
+        blockHash: json['blockHash']?.toString(),
+        blockHeight: blockNumber,
       );
     } catch (e) {
       print('❌ Error parsing Etherscan V2 transaction: $e');
@@ -228,12 +227,11 @@ class Transaction {
     }
   }
 
-  // Filecoin transaction parsing - NEW
+  // Filecoin transaction parsing
   factory Transaction.fromFilecoin(Map<String, dynamic> json, String myAddress) {
     try {
       final message = json['Message'] ?? json;
 
-      // Parse CID
       String hash = '';
       if (json['Cid'] != null) {
         hash = json['Cid'] is Map ? (json['Cid']['/'] ?? '') : json['Cid'].toString();
@@ -241,7 +239,6 @@ class Transaction {
         hash = json['CID'] is Map ? (json['CID']['/'] ?? '') : json['CID'].toString();
       }
 
-      // Parse value (from attoFIL to FIL)
       double amount = 0.0;
       try {
         final valueStr = message['Value']?.toString() ?? '0';
@@ -251,17 +248,14 @@ class Transaction {
         print('⚠️ Error parsing Filecoin amount: $e');
       }
 
-      // Parse addresses
       final from = message['From']?.toString() ?? '';
       final to = message['To']?.toString() ?? '';
 
-      // Parse height for timestamp approximation (10 blocks per 5 minutes)
       int height = 0;
       if (json['Height'] != null) {
         height = int.tryParse(json['Height'].toString()) ?? 0;
       }
 
-      // Approximate timestamp (Filecoin epoch time)
       final timestamp = height > 0
           ? DateTime.now().subtract(Duration(minutes: (height * 30) ~/ 60))
           : DateTime.now();
@@ -277,61 +271,12 @@ class Transaction {
         fee: 0.0,
         status: TransactionStatus.confirmed,
         isIncoming: to.toLowerCase() == myAddress.toLowerCase(),
+        blockHeight: height,
       );
     } catch (e) {
       print('❌ Error parsing Filecoin transaction: $e');
       rethrow;
     }
-  }
-
-  static DateTime _parseTimestamp(Map<String, dynamic> json) {
-    try {
-      if (json['received'] != null) {
-        return DateTime.parse(json['received']);
-      } else if (json['confirmed'] != null) {
-        return DateTime.parse(json['confirmed']);
-      } else if (json['timestamp'] != null) {
-        final timestamp = json['timestamp'];
-        if (timestamp is int) {
-          return DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-        } else if (timestamp is String) {
-          return DateTime.parse(timestamp);
-        }
-      } else if (json['timeStamp'] != null) {
-        final ts = int.tryParse(json['timeStamp'].toString()) ?? 0;
-        return DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-      }
-    } catch (e) {
-      print('⚠️ Error parsing timestamp: $e');
-    }
-    return DateTime.now();
-  }
-
-  static double _parseFee(Map<String, dynamic> json, CoinType coinType) {
-    try {
-      if (coinType == CoinType.btc) {
-        int satoshis = json['fees'] ?? 0;
-        return satoshis / 100000000.0;
-      } else if (coinType == CoinType.eth) {
-        final gasUsed = json['gasUsed']?.toString() ?? '0';
-        final gasPrice = json['gasPrice']?.toString() ?? '0';
-        final fee = (double.tryParse(gasUsed) ?? 0.0) * (double.tryParse(gasPrice) ?? 0.0);
-        return fee / 1e18;
-      }
-    } catch (e) {
-      print('⚠️ Error parsing fee: $e');
-    }
-    return 0.0;
-  }
-
-  static TransactionStatus _getStatus(int confirmations, CoinType coinType) {
-    int required = coinType == CoinType.btc ? AppConstants.btcConfirmations :
-    coinType == CoinType.eth ? AppConstants.ethConfirmations :
-    AppConstants.filConfirmations;
-
-    if (confirmations == 0) return TransactionStatus.pending;
-    if (confirmations >= required) return TransactionStatus.confirmed;
-    return TransactionStatus.confirming;
   }
 }
 

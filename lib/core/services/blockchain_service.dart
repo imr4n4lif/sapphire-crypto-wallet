@@ -42,7 +42,7 @@ class BlockchainService {
     }
   }
 
-  // Get Bitcoin balance with rate limiting
+  // Get Bitcoin balance with rate limiting (Using mempool.space API for testnet4)
   Future<double> getBitcoinBalance(String address) async {
     try {
       // Check cache first (valid for 1 minute)
@@ -57,8 +57,8 @@ class BlockchainService {
       _lastBtcApiCall = DateTime.now();
 
       final url = _isMainnet
-          ? '${AppConstants.btcMainnetApi}/addrs/$address/balance'
-          : '${AppConstants.btcTestnetApi}/addrs/$address/balance';
+          ? '${AppConstants.btcMainnetApi}/address/$address'
+          : '${AppConstants.btcTestnetApi}/address/$address';
 
       print('📡 Fetching BTC balance for: $address');
 
@@ -69,7 +69,7 @@ class BlockchainService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final balanceSatoshis = data['final_balance'] ?? 0;
+        final balanceSatoshis = data['chain_stats']['funded_txo_sum'] - data['chain_stats']['spent_txo_sum'];
         final balance = balanceSatoshis / 100000000;
 
         // Update cache
@@ -157,15 +157,15 @@ class BlockchainService {
     return 0.0;
   }
 
-  // Get Bitcoin transactions with rate limiting
+  // Get Bitcoin transactions (Using mempool.space API)
   Future<List<Transaction>> getBitcoinTransactions(String address) async {
     try {
       await _respectRateLimit(_lastBtcApiCall);
       _lastBtcApiCall = DateTime.now();
 
       final url = _isMainnet
-          ? '${AppConstants.btcMainnetApi}/addrs/$address/full?limit=20'
-          : '${AppConstants.btcTestnetApi}/addrs/$address/full?limit=20';
+          ? '${AppConstants.btcMainnetApi}/address/$address/txs'
+          : '${AppConstants.btcTestnetApi}/address/$address/txs';
 
       print('📡 Fetching BTC transactions for: $address');
 
@@ -175,13 +175,12 @@ class BlockchainService {
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final txs = data['txs'] as List? ?? [];
+        final txs = json.decode(response.body) as List;
         print('✅ Found ${txs.length} BTC transactions');
 
-        return txs.map((tx) {
+        return txs.take(20).map((tx) {
           try {
-            return Transaction.fromJson(tx, CoinType.btc, address);
+            return Transaction.fromMempoolBitcoin(tx, address);
           } catch (e) {
             print('⚠️ Error parsing BTC transaction: $e');
             return null;
@@ -200,41 +199,35 @@ class BlockchainService {
     }
   }
 
-  // Get Ethereum transactions using Etherscan V2 API - FULLY FIXED
+  // Get Ethereum transactions using Etherscan V2 API
   Future<List<Transaction>> getEthereumTransactions(String address) async {
     try {
       final apiKey = AppConstants.etherscanApiKey;
 
       if (apiKey.isEmpty) {
         print('⚠️ Etherscan API key not found in .env file');
-        print('ℹ️ Add ETHERSCAN_API_KEY=your_key to .env file');
-        print('ℹ️ Get free API key from: https://etherscan.io/apis');
         return <Transaction>[];
       }
 
       await _respectRateLimit(_lastEthApiCall);
       _lastEthApiCall = DateTime.now();
 
-      // Etherscan V2 API endpoint with chainid parameter
-      final chainId = _isMainnet ? 1 : 11155111; // Mainnet: 1, Sepolia: 11155111
+      final chainId = _isMainnet ? 1 : 11155111;
       final baseUrl = 'https://api.etherscan.io/v2/api';
 
       final url = '$baseUrl?chainid=$chainId&module=account&action=txlist&address=$address&startblock=0&endblock=99999999&page=1&offset=20&sort=desc&apikey=$apiKey';
 
-      print('📡 Fetching ETH transactions for: $address (Etherscan V2 API)');
+      print('📡 Fetching ETH transactions for: $address');
 
       final response = await http.get(Uri.parse(url)).timeout(
         const Duration(seconds: 15),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
-      print('🔍 ETH API Response Status: ${response.statusCode}');
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
         if (data is! Map<String, dynamic>) {
-          print('⚠️ Unexpected response format: not a JSON object');
           return <Transaction>[];
         }
 
@@ -242,56 +235,21 @@ class BlockchainService {
         final message = data['message']?.toString() ?? '';
         final result = data['result'];
 
-        print('🔍 Etherscan Status: $status, Message: $message');
-
         if (status == '0') {
-          if (message.toLowerCase().contains('no transactions found') ||
-              message.toLowerCase().contains('no records found')) {
-            print('ℹ️ No ETH transactions found for this address');
+          if (message.toLowerCase().contains('no transactions found')) {
+            print('ℹ️ No ETH transactions found');
             return <Transaction>[];
           }
-
-          if (result is String) {
-            final resultLower = result.toLowerCase();
-            if (resultLower.contains('invalid api key') ||
-                resultLower.contains('missing') ||
-                resultLower.contains('wrong api key')) {
-              print('❌ Invalid or missing Etherscan API key');
-              print('ℹ️ Get free key at: https://etherscan.io/apis');
-              return <Transaction>[];
-            }
-          }
-
-          if (message.toLowerCase().contains('rate limit')) {
-            print('⚠️ Etherscan API rate limited');
-            return <Transaction>[];
-          }
-
           print('⚠️ Etherscan API Error: $message');
           return <Transaction>[];
         }
 
-        // Success - parse transactions from V2 API
-        if (status == '1' && result != null) {
-          if (result is! List) {
-            print('⚠️ Result is not a list: ${result.runtimeType}');
-            return <Transaction>[];
-          }
-
+        if (status == '1' && result != null && result is List) {
           final txs = result as List;
           print('✅ Found ${txs.length} ETH transactions');
 
-          if (txs.isEmpty) {
-            print('ℹ️ No ETH transactions found for this address');
-            return <Transaction>[];
-          }
-
           return txs.take(20).map((tx) {
             try {
-              if (tx is! Map<String, dynamic>) {
-                print('⚠️ Transaction is not a map: ${tx.runtimeType}');
-                return null;
-              }
               return Transaction.fromEtherscanV2(tx, address);
             } catch (e) {
               print('⚠️ Error parsing ETH transaction: $e');
@@ -300,10 +258,6 @@ class BlockchainService {
           }).whereType<Transaction>().toList();
         }
 
-        print('⚠️ Unexpected Etherscan V2 response format');
-        return <Transaction>[];
-      } else if (response.statusCode == 404) {
-        print('⚠️ API endpoint not found (404)');
         return <Transaction>[];
       } else {
         print('⚠️ Failed to fetch ETH transactions: ${response.statusCode}');
@@ -325,16 +279,13 @@ class BlockchainService {
 
       print('📡 Fetching FIL transactions for: $address');
 
-      // Query recent messages involving this address
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'jsonrpc': '2.0',
           'method': 'Filecoin.StateListMessages',
-          'params': [{
-            'To': address,
-          }, null, 0],
+          'params': [{'To': address}, null, 0],
           'id': 1,
         }),
       ).timeout(
@@ -375,193 +326,8 @@ class BlockchainService {
     }
   }
 
-  // Send Bitcoin
-  Future<String> sendBitcoin({
-    required String fromAddress,
-    required String toAddress,
-    required String privateKey,
-    required double amount,
-  }) async {
-    try {
-      throw UnimplementedError(
-          'Bitcoin sending requires signing library. Use testnet faucet to receive, '
-              'or implement with bitcoin_base package for production.'
-      );
-    } catch (e) {
-      throw Exception('Failed to send Bitcoin: $e');
-    }
-  }
-
-  // Send Ethereum
-  Future<String> sendEthereum({
-    required String toAddress,
-    required String privateKey,
-    required double amount,
-  }) async {
-    try {
-      print('📤 Preparing ETH transaction...');
-      print('To: $toAddress');
-      print('Amount: $amount ETH');
-
-      final credentials = web3dart.EthPrivateKey.fromHex(privateKey);
-      final sender = await credentials.address;
-      final recipient = web3dart.EthereumAddress.fromHex(toAddress);
-
-      // Convert amount to BigInt wei properly
-      final amountStr = amount.toStringAsFixed(18);
-      final parts = amountStr.split('.');
-      final integerPart = BigInt.parse(parts[0]);
-      final fractionalPart = parts.length > 1 ? parts[1] : '0';
-
-      final integerWei = integerPart * BigInt.from(10).pow(18);
-      final fractionalWei = BigInt.parse(fractionalPart.padRight(18, '0'));
-      final amountInWei = web3dart.EtherAmount.inWei(integerWei + fractionalWei);
-
-      print('Amount in Wei: ${amountInWei.getInWei}');
-
-      // Get current balance
-      final balance = await _ethClient.getBalance(sender);
-      print('Current Balance: ${balance.getInWei} wei (${balance.getValueInUnit(web3dart.EtherUnit.ether)} ETH)');
-
-      // Get gas price
-      final gasPrice = await _ethClient.getGasPrice();
-      print('Gas Price: ${gasPrice.getInWei} wei (${gasPrice.getValueInUnit(web3dart.EtherUnit.gwei)} Gwei)');
-
-      // Estimate gas limit
-      BigInt gasLimit;
-      try {
-        gasLimit = await _ethClient.estimateGas(
-          sender: sender,
-          to: recipient,
-          value: amountInWei,
-        );
-        print('Estimated Gas Limit: $gasLimit');
-      } catch (e) {
-        print('⚠️ Gas estimation failed, using default: $e');
-        gasLimit = BigInt.from(21000);
-      }
-
-      // Add 20% buffer
-      final gasLimitWithBuffer = (gasLimit.toDouble() * 1.2).round();
-      print('Gas Limit with Buffer: $gasLimitWithBuffer');
-
-      // Calculate gas cost
-      final gasCost = gasPrice.getInWei * BigInt.from(gasLimitWithBuffer);
-      print('Total Gas Cost: $gasCost wei (${web3dart.EtherAmount.inWei(gasCost).getValueInUnit(web3dart.EtherUnit.ether)} ETH)');
-
-      // Check balance
-      final totalRequired = amountInWei.getInWei + gasCost;
-      print('Total Required: $totalRequired wei (${web3dart.EtherAmount.inWei(totalRequired).getValueInUnit(web3dart.EtherUnit.ether)} ETH)');
-
-      if (balance.getInWei < totalRequired) {
-        final shortage = totalRequired - balance.getInWei;
-        final shortageEth = web3dart.EtherAmount.inWei(shortage).getValueInUnit(web3dart.EtherUnit.ether);
-        throw Exception(
-            'Insufficient funds!\n'
-                'Need: ${web3dart.EtherAmount.inWei(totalRequired).getValueInUnit(web3dart.EtherUnit.ether)} ETH\n'
-                'Have: ${balance.getValueInUnit(web3dart.EtherUnit.ether)} ETH\n'
-                'Short: $shortageEth ETH\n\n'
-                'Breakdown:\n'
-                '• Amount: $amount ETH\n'
-                '• Gas: ${web3dart.EtherAmount.inWei(gasCost).getValueInUnit(web3dart.EtherUnit.ether)} ETH'
-        );
-      }
-
-      // Create and send transaction
-      final txData = web3dart.Transaction(
-        to: recipient,
-        value: amountInWei,
-        gasPrice: gasPrice,
-        maxGas: gasLimitWithBuffer,
-      );
-
-      print('🚀 Sending transaction...');
-      final txHash = await _ethClient.sendTransaction(
-        credentials,
-        txData,
-        chainId: _isMainnet ? 1 : 11155111,
-      );
-
-      print('✅ Transaction sent! Hash: $txHash');
-      return txHash;
-    } catch (e) {
-      print('❌ Ethereum send error: $e');
-
-      String errorMsg = e.toString();
-      if (errorMsg.contains('Could not parse BigInt')) {
-        errorMsg = 'Invalid amount format. Please enter a valid number.';
-      } else if (errorMsg.contains('insufficient funds')) {
-        rethrow;
-      }
-
-      throw Exception(errorMsg);
-    }
-  }
-
-  // Send Filecoin
-  Future<String> sendFilecoin({
-    required String fromAddress,
-    required String toAddress,
-    required String privateKey,
-    required double amount,
-  }) async {
-    try {
-      final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
-
-      print('📤 Preparing Filecoin transaction...');
-
-      // Convert FIL to attoFIL
-      final amountAttoFil = (amount * BigInt.from(10).pow(18).toDouble()).toInt().toString();
-
-      // Get nonce
-      final nonceResponse = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'jsonrpc': '2.0',
-          'method': 'Filecoin.MpoolGetNonce',
-          'params': [fromAddress],
-          'id': 1,
-        }),
-      );
-
-      int nonce = 0;
-      if (nonceResponse.statusCode == 200) {
-        final nonceData = json.decode(nonceResponse.body);
-        nonce = nonceData['result'] ?? 0;
-      }
-
-      print('Nonce: $nonce');
-
-      // For production, this requires proper Filecoin message signing
-      throw UnimplementedError(
-          'Filecoin sending requires filecoin signing library.\n'
-              'For testnet: https://faucet.calibration.fildev.network/\n'
-              'For implementation: https://github.com/textileio/dart-filecoin\n\n'
-              'Message details:\n'
-              'From: $fromAddress\n'
-              'To: $toAddress\n'
-              'Amount: $amount FIL\n'
-              'Nonce: $nonce'
-      );
-    } catch (e) {
-      print('❌ Filecoin send error: $e');
-      rethrow;
-    }
-  }
-
-  // Get gas price
-  Future<web3dart.EtherAmount> getGasPrice() async {
-    try {
-      return await _ethClient.getGasPrice();
-    } catch (e) {
-      print('⚠️ Failed to get gas price, using default');
-      return web3dart.EtherAmount.fromUnitAndValue(web3dart.EtherUnit.gwei, 20);
-    }
-  }
-
-  // Estimate gas
-  Future<BigInt> estimateGas({
+  // Estimate gas fee for Ethereum
+  Future<GasFeeEstimate> estimateEthereumGasFee({
     required String fromAddress,
     required String toAddress,
     required double amount,
@@ -578,18 +344,142 @@ class BlockchainService {
       final fractionalWei = BigInt.parse(fractionalPart.padRight(18, '0'));
       final value = web3dart.EtherAmount.inWei(integerWei + fractionalWei);
 
-      return await _ethClient.estimateGas(
-        sender: from,
-        to: to,
-        value: value,
+      // Get gas price
+      final gasPrice = await _ethClient.getGasPrice();
+
+      // Estimate gas limit
+      BigInt gasLimit;
+      try {
+        gasLimit = await _ethClient.estimateGas(
+          sender: from,
+          to: to,
+          value: value,
+        );
+      } catch (e) {
+        gasLimit = BigInt.from(21000);
+      }
+
+      final gasFee = gasPrice.getInWei * gasLimit;
+      final gasFeeEth = web3dart.EtherAmount.inWei(gasFee).getValueInUnit(web3dart.EtherUnit.ether);
+
+      return GasFeeEstimate(
+        gasLimit: gasLimit.toInt(),
+        gasPrice: gasPrice.getValueInUnit(web3dart.EtherUnit.gwei),
+        totalFee: gasFeeEth,
       );
     } catch (e) {
-      print('⚠️ Gas estimation failed: $e');
-      return BigInt.from(21000);
+      print('❌ Error estimating gas fee: $e');
+      return GasFeeEstimate(
+        gasLimit: 21000,
+        gasPrice: 20.0,
+        totalFee: 0.00042,
+      );
     }
   }
 
-  // Clear cache
+  // Send Bitcoin
+  Future<String> sendBitcoin({
+    required String fromAddress,
+    required String toAddress,
+    required String privateKey,
+    required double amount,
+  }) async {
+    try {
+      throw UnimplementedError(
+          'Bitcoin sending requires signing library. Use testnet faucet to receive:\n'
+              '• Testnet4: https://mempool.space/testnet4/faucet\n'
+              '• Testnet4: https://coinfaucet.eu/en/btc-testnet4/\n\n'
+              'For implementation: Use bitcoin_base package'
+      );
+    } catch (e) {
+      throw Exception('Failed to send Bitcoin: $e');
+    }
+  }
+
+  // Send Ethereum
+  Future<String> sendEthereum({
+    required String toAddress,
+    required String privateKey,
+    required double amount,
+  }) async {
+    try {
+      print('📤 Preparing ETH transaction...');
+
+      final credentials = web3dart.EthPrivateKey.fromHex(privateKey);
+      final sender = await credentials.address;
+      final recipient = web3dart.EthereumAddress.fromHex(toAddress);
+
+      final amountStr = amount.toStringAsFixed(18);
+      final parts = amountStr.split('.');
+      final integerPart = BigInt.parse(parts[0]);
+      final fractionalPart = parts.length > 1 ? parts[1] : '0';
+      final integerWei = integerPart * BigInt.from(10).pow(18);
+      final fractionalWei = BigInt.parse(fractionalPart.padRight(18, '0'));
+      final amountInWei = web3dart.EtherAmount.inWei(integerWei + fractionalWei);
+
+      final balance = await _ethClient.getBalance(sender);
+      final gasPrice = await _ethClient.getGasPrice();
+
+      BigInt gasLimit;
+      try {
+        gasLimit = await _ethClient.estimateGas(
+          sender: sender,
+          to: recipient,
+          value: amountInWei,
+        );
+      } catch (e) {
+        gasLimit = BigInt.from(21000);
+      }
+
+      final gasLimitWithBuffer = (gasLimit.toDouble() * 1.2).round();
+      final gasCost = gasPrice.getInWei * BigInt.from(gasLimitWithBuffer);
+      final totalRequired = amountInWei.getInWei + gasCost;
+
+      if (balance.getInWei < totalRequired) {
+        final shortage = totalRequired - balance.getInWei;
+        final shortageEth = web3dart.EtherAmount.inWei(shortage).getValueInUnit(web3dart.EtherUnit.ether);
+        throw Exception(
+            'Insufficient funds!\n'
+                'Need: ${web3dart.EtherAmount.inWei(totalRequired).getValueInUnit(web3dart.EtherUnit.ether)} ETH\n'
+                'Have: ${balance.getValueInUnit(web3dart.EtherUnit.ether)} ETH\n'
+                'Short: $shortageEth ETH'
+        );
+      }
+
+      final txData = web3dart.Transaction(
+        to: recipient,
+        value: amountInWei,
+        gasPrice: gasPrice,
+        maxGas: gasLimitWithBuffer,
+      );
+
+      final txHash = await _ethClient.sendTransaction(
+        credentials,
+        txData,
+        chainId: _isMainnet ? 1 : 11155111,
+      );
+
+      print('✅ Transaction sent! Hash: $txHash');
+      return txHash;
+    } catch (e) {
+      print('❌ Ethereum send error: $e');
+      rethrow;
+    }
+  }
+
+  // Send Filecoin
+  Future<String> sendFilecoin({
+    required String fromAddress,
+    required String toAddress,
+    required String privateKey,
+    required double amount,
+  }) async {
+    throw UnimplementedError(
+        'Filecoin sending requires filecoin signing library.\n'
+            'For testnet: https://faucet.calibration.fildev.network/'
+    );
+  }
+
   void clearCache() {
     _btcBalanceCache.clear();
     _ethTxCache.clear();
@@ -600,4 +490,16 @@ class BlockchainService {
   void dispose() {
     _ethClient.dispose();
   }
+}
+
+class GasFeeEstimate {
+  final int gasLimit;
+  final double gasPrice;
+  final double totalFee;
+
+  GasFeeEstimate({
+    required this.gasLimit,
+    required this.gasPrice,
+    required this.totalFee,
+  });
 }

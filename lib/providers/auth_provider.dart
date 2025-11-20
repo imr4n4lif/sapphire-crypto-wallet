@@ -20,14 +20,12 @@ class AuthProvider with ChangeNotifier {
   Future<void> initialize() async {
     print('🔐 Initializing AuthProvider...');
 
-    // Check if biometric is available
     final canCheck = await _biometric.canCheckBiometrics();
     final isSupported = await _biometric.isDeviceSupported();
     _biometricAvailable = canCheck && isSupported;
 
-    print('🔐 Biometric available: $_biometricAvailable (canCheck: $canCheck, isSupported: $isSupported)');
+    print('🔐 Biometric available: $_biometricAvailable');
 
-    // Check if biometric is enabled in settings
     _biometricEnabled = await _storage.readBool(AppConstants.keyBiometricEnabled);
     print('🔐 Biometric enabled in settings: $_biometricEnabled');
 
@@ -35,11 +33,8 @@ class AuthProvider with ChangeNotifier {
       _biometricType = await _biometric.getBiometricTypeString();
       print('🔐 Biometric type: $_biometricType');
 
-      // List available biometrics for debugging
       final available = await _biometric.getAvailableBiometrics();
       print('🔐 Available biometric types: $available');
-    } else {
-      print('⚠️ Biometric not available on this device');
     }
 
     notifyListeners();
@@ -72,16 +67,14 @@ class AuthProvider with ChangeNotifier {
 
   Future<bool> authenticateWithBiometric() async {
     print('🔐 authenticateWithBiometric called');
-    print('🔐 - Available: $_biometricAvailable');
-    print('🔐 - Enabled: $_biometricEnabled');
 
     if (!_biometricAvailable) {
-      print('⚠️ Biometric not available, cannot authenticate');
+      print('⚠️ Biometric not available');
       return false;
     }
 
     if (!_biometricEnabled) {
-      print('⚠️ Biometric not enabled in settings, cannot authenticate');
+      print('⚠️ Biometric not enabled');
       return false;
     }
 
@@ -99,11 +92,26 @@ class AuthProvider with ChangeNotifier {
     return authenticated;
   }
 
-  Future<void> setBiometricEnabled(bool enabled) async {
+  Future<bool> setBiometricEnabled(bool enabled) async {
     print('🔐 Setting biometric enabled: $enabled');
+
+    // If enabling, confirm with biometric first
+    if (enabled && _biometricAvailable) {
+      print('🔐 Confirming with biometric before enabling...');
+      final authenticated = await _biometric.authenticate(
+        reason: 'Authenticate to enable ${_biometricType}',
+      );
+
+      if (!authenticated) {
+        print('⚠️ Biometric confirmation failed');
+        return false;
+      }
+    }
+
     _biometricEnabled = enabled;
     await _storage.saveBool(AppConstants.keyBiometricEnabled, enabled);
     notifyListeners();
+    return true;
   }
 
   void logout() {

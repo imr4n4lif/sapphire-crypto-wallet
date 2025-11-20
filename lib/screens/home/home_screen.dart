@@ -18,14 +18,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  List<double> _portfolioHistory = [];
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Initial refresh
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshData();
     });
@@ -39,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Refresh when app comes to foreground
     if (state == AppLifecycleState.resumed) {
       print('🔄 App resumed, refreshing data...');
       _refreshData();
@@ -50,16 +46,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     print('🔄 Manual refresh triggered');
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
-
-    // Update portfolio history for graph
-    final totalValue = context.read<WalletProvider>().totalPortfolioValue;
-    setState(() {
-      _portfolioHistory.add(totalValue);
-      // Keep only last 20 data points
-      if (_portfolioHistory.length > 20) {
-        _portfolioHistory.removeAt(0);
-      }
-    });
   }
 
   void _showWalletMenu(BuildContext context) {
@@ -233,7 +219,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildPortfolioGraph(WalletProvider walletProvider) {
-    if (_portfolioHistory.length < 2) {
+    final history = walletProvider.currentWalletPortfolioHistory;
+
+    if (history.length < 2) {
       return const SizedBox.shrink();
     }
 
@@ -257,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   borderData: FlBorderData(show: false),
                   lineBarsData: [
                     LineChartBarData(
-                      spots: _portfolioHistory.asMap().entries.map((entry) {
+                      spots: history.asMap().entries.map((entry) {
                         return FlSpot(entry.key.toDouble(), entry.value);
                       }).toList(),
                       isCurved: true,
@@ -396,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-// Wallet Menu Bottom Sheet - IMPROVED UI
+// Wallet Menu Bottom Sheet
 class _WalletMenuSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -412,7 +400,6 @@ class _WalletMenuSheet extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Handle bar
               Container(
                 margin: const EdgeInsets.only(top: 12, bottom: 8),
                 width: 40,
@@ -434,10 +421,6 @@ class _WalletMenuSheet extends StatelessWidget {
                     IconButton(
                       icon: Container(
                         padding: const EdgeInsets.all(8),
-                        // decoration: BoxDecoration(
-                        //   color: Theme.of(context).colorScheme.primaryContainer,
-                        //   shape: BoxShape.circle,
-                        // ),
                         child: Icon(
                           Icons.add,
                           color: Theme.of(context).colorScheme.primary,
@@ -509,9 +492,20 @@ class _WalletMenuSheet extends StatelessWidget {
                         ),
                         onTap: () async {
                           if (!isSelected) {
+                            // Show loading
+                            showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (context) => const Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+
                             await walletProvider.switchWallet(wallet['id'] as String);
+
                             if (context.mounted) {
-                              Navigator.pop(context);
+                              Navigator.pop(context); // Close loading
+                              Navigator.pop(context); // Close bottom sheet
                             }
                           }
                         },
@@ -540,10 +534,6 @@ class _WalletMenuSheet extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(16),
-                // decoration: BoxDecoration(
-                //   color: Theme.of(context).colorScheme.primaryContainer,
-                //   shape: BoxShape.circle,
-                // ),
                 child: Icon(
                   Icons.account_balance_wallet,
                   size: 48,
@@ -904,10 +894,19 @@ class _WalletMenuSheet extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () async {
+              // Show loading
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator()),
+              );
+
               await context.read<WalletProvider>().deleteWalletById(walletId);
+
               if (context.mounted) {
-                Navigator.pop(context);
-                Navigator.pop(context); // Close bottom sheet too
+                Navigator.pop(context); // Close loading
+                Navigator.pop(context); // Close confirm dialog
+                Navigator.pop(context); // Close bottom sheet
               }
             },
             style: ElevatedButton.styleFrom(

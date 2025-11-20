@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../providers/wallet_provider.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/services/blockchain_service.dart';
 
 class SendScreen extends StatefulWidget {
   final CoinType coinType;
@@ -18,6 +19,8 @@ class _SendScreenState extends State<SendScreen> {
   final _addressController = TextEditingController();
   final _amountController = TextEditingController();
   bool _isSending = false;
+  bool _isEstimatingFee = false;
+  double? _estimatedFee;
 
   @override
   void dispose() {
@@ -41,10 +44,65 @@ class _SendScreenState extends State<SendScreen> {
     }
   }
 
+  void _setMaxAmount() {
+    final walletProvider = context.read<WalletProvider>();
+    final balance = walletProvider.getCoinBalance(widget.coinType);
+
+    if (balance != null) {
+      double maxAmount = balance.balance;
+
+      // For ETH, subtract estimated gas fee
+      if (widget.coinType == CoinType.eth && _estimatedFee != null) {
+        maxAmount = (maxAmount - _estimatedFee!).clamp(0.0, double.infinity);
+      }
+
+      _amountController.text = maxAmount.toStringAsFixed(8);
+      _estimateGasFee();
+    }
+  }
+
+  Future<void> _estimateGasFee() async {
+    if (widget.coinType != CoinType.eth) return;
+
+    final address = _addressController.text.trim();
+    final amountText = _amountController.text.trim();
+
+    if (address.isEmpty || amountText.isEmpty) return;
+
+    final amount = double.tryParse(amountText);
+    if (amount == null || amount <= 0) return;
+
+    setState(() {
+      _isEstimatingFee = true;
+      _estimatedFee = null;
+    });
+
+    try {
+      final walletProvider = context.read<WalletProvider>();
+      if (walletProvider.wallet == null) return;
+
+      final estimate = await BlockchainService().estimateEthereumGasFee(
+        fromAddress: walletProvider.wallet!.ethAddress,
+        toAddress: address,
+        amount: amount,
+      );
+
+      setState(() {
+        _estimatedFee = estimate.totalFee;
+        _isEstimatingFee = false;
+      });
+    } catch (e) {
+      print('Error estimating fee: $e');
+      setState(() {
+        _estimatedFee = null;
+        _isEstimatingFee = false;
+      });
+    }
+  }
+
   Future<void> _sendTransaction() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // Parse amount carefully
     final amountText = _amountController.text.trim();
     final amount = double.tryParse(amountText);
 
@@ -68,31 +126,62 @@ class _SendScreenState extends State<SendScreen> {
           children: [
             Text(
               'Send $amount ${_coinInfo.symbol}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             const SizedBox(height: 8),
             Text('To: ${_addressController.text}'),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Transaction fees will be deducted from your balance',
-                      style: TextStyle(fontSize: 12),
+            if (_estimatedFee != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Estimated Gas Fee',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue.shade700,
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text('${_estimatedFee!.toStringAsFixed(6)} ETH'),
+                    const Divider(height: 16),
+                    Text(
+                      'Total: ${(amount + _estimatedFee!).toStringAsFixed(6)} ETH',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Network fees will be deducted',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -148,7 +237,6 @@ class _SendScreenState extends State<SendScreen> {
       setState(() => _isSending = false);
 
       if (mounted) {
-        // Parse error message
         String errorMessage = e.toString();
         if (errorMessage.contains('Exception:')) {
           errorMessage = errorMessage.split('Exception:').last.trim();
@@ -264,6 +352,7 @@ class _SendScreenState extends State<SendScreen> {
                     onPressed: _scanQRCode,
                   ),
                 ),
+                onChanged: (_) => _estimateGasFee(),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Please enter recipient address';
@@ -278,8 +367,14 @@ class _SendScreenState extends State<SendScreen> {
                   labelText: 'Amount',
                   hintText: '0.00',
                   suffixText: _coinInfo.symbol,
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.file_upload_outlined),
+                    tooltip: 'Max',
+                    onPressed: _setMaxAmount,
+                  ),
                 ),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                onChanged: (_) => _estimateGasFee(),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
                     return 'Please enter amount';
@@ -291,13 +386,75 @@ class _SendScreenState extends State<SendScreen> {
                   }
 
                   final balance = context.read<WalletProvider>().getCoinBalance(widget.coinType);
-                  if (balance != null && amount > balance.balance) {
-                    return 'Insufficient balance';
+                  if (balance != null) {
+                    final maxAvailable = widget.coinType == CoinType.eth && _estimatedFee != null
+                        ? balance.balance - _estimatedFee!
+                        : balance.balance;
+
+                    if (amount > maxAvailable) {
+                      return 'Insufficient balance';
+                    }
                   }
 
                   return null;
                 },
               ),
+
+              // Gas Fee Display
+              if (widget.coinType == CoinType.eth) ...[
+                const SizedBox(height: 16),
+                if (_isEstimatingFee)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: const Row(
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        SizedBox(width: 12),
+                        Text('Estimating gas fee...'),
+                      ],
+                    ),
+                  )
+                else if (_estimatedFee != null)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.local_gas_station, color: Colors.blue),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Estimated Gas Fee',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                '${_estimatedFee!.toStringAsFixed(6)} ETH',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+
               const SizedBox(height: 24),
               Container(
                 padding: const EdgeInsets.all(16),
@@ -314,7 +471,7 @@ class _SendScreenState extends State<SendScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Transaction fees will be deducted. Double-check the address before sending.',
+                        'Double-check the address before sending. Transactions cannot be reversed.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
