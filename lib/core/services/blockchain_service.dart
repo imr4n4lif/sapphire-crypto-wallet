@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:web3dart/web3dart.dart' as web3dart;
 import 'dart:convert';
+import 'dart:async';
 import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
 import 'package:bitcoin_base/bitcoin_base.dart';
@@ -13,19 +14,32 @@ class BlockchainService {
   late web3dart.Web3Client _ethClient;
   bool _isMainnet = true;
 
-  // Enhanced rate limiting
+  // Enhanced rate limiting with exponential backoff
   DateTime? _lastBtcApiCall;
   DateTime? _lastEthApiCall;
   DateTime? _lastFilApiCall;
-  final Duration _apiCallDelay = const Duration(milliseconds: 800);
+  Duration _apiCallDelay = const Duration(milliseconds: 800);
+  static const int _maxRetries = 3;
 
-  // Enhanced caching with timestamps
-  Map<String, _CachedData> _cache = {};
+  // Enhanced caching with timestamps and TTL
+  final Map<String, _CachedData> _cache = {};
+  static const Duration _balanceCacheTTL = Duration(minutes: 2);
+  static const Duration _txCacheTTL = Duration(minutes: 3);
+  static const Duration _feeCacheTTL = Duration(minutes: 1);
+
+  // Connection pooling for better performance
+  final http.Client _httpClient = http.Client();
 
   void initialize(bool isMainnet) {
     _isMainnet = isMainnet;
     final rpcUrl = isMainnet ? AppConstants.ethMainnetRpc : AppConstants.ethTestnetRpc;
-    _ethClient = web3dart.Web3Client(rpcUrl, http.Client());
+
+    // Check if Infura key exists
+    if (AppConstants.infuraProjectId.isEmpty) {
+      print('⚠️ Warning: Infura Project ID not configured');
+    }
+
+    _ethClient = web3dart.Web3Client(rpcUrl, _httpClient);
     print('🔗 Blockchain service initialized (${isMainnet ? "Mainnet" : "Testnet"})');
   }
 
@@ -36,7 +50,7 @@ class BlockchainService {
   Future<double> getBitcoinBalance(String address) async {
     try {
       final cacheKey = 'btc_balance_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 2))) {
+      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
         return _cache[cacheKey]!.data as double;
       }
 
@@ -47,19 +61,27 @@ class BlockchainService {
           ? '${AppConstants.btcMainnetApi}/address/$address'
           : '${AppConstants.btcTestnetApi}/address/$address';
 
-      final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Request timeout'),
-      );
+      final response = await _makeHttpRequest(url);
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final data = json.decode(response.body);
-        final funded = data['chain_stats']['funded_txo_sum'] ?? 0;
-        final spent = data['chain_stats']['spent_txo_sum'] ?? 0;
-        final balanceSatoshis = funded - spent;
+
+        // Calculate balance from UTXOs
+        final chainStats = data['chain_stats'] ?? {};
+        final mempoolStats = data['mempool_stats'] ?? {};
+
+        final chainFunded = chainStats['funded_txo_sum'] ?? 0;
+        final chainSpent = chainStats['spent_txo_sum'] ?? 0;
+        final mempoolFunded = mempoolStats['funded_txo_sum'] ?? 0;
+        final mempoolSpent = mempoolStats['spent_txo_sum'] ?? 0;
+
+        final totalFunded = chainFunded + mempoolFunded;
+        final totalSpent = chainSpent + mempoolSpent;
+        final balanceSatoshis = totalFunded - totalSpent;
         final balance = balanceSatoshis / 100000000.0;
 
         _cache[cacheKey] = _CachedData(balance, DateTime.now());
+        print('✅ BTC Balance: $balance');
         return balance;
       }
 
@@ -73,7 +95,7 @@ class BlockchainService {
   Future<List<Transaction>> getBitcoinTransactions(String address) async {
     try {
       final cacheKey = 'btc_tx_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 2))) {
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
         return _cache[cacheKey]!.data as List<Transaction>;
       }
 
@@ -84,17 +106,21 @@ class BlockchainService {
           ? '${AppConstants.btcMainnetApi}/address/$address/txs'
           : '${AppConstants.btcTestnetApi}/address/$address/txs';
 
-      final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
-      );
+      final response = await _makeHttpRequest(url);
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final txs = json.decode(response.body) as List;
         final transactions = txs.take(20).map((tx) {
-          return Transaction.fromMempoolBitcoin(tx, address);
+          try {
+            return Transaction.fromMempoolBitcoin(tx, address);
+          } catch (e) {
+            print('⚠️ Error parsing BTC tx: $e');
+            return null;
+          }
         }).whereType<Transaction>().toList();
 
         _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+        print('✅ Fetched ${transactions.length} BTC transactions');
         return transactions;
       }
 
@@ -113,33 +139,56 @@ class BlockchainService {
     required double feeRate,
   }) async {
     try {
+      print('📤 Preparing Bitcoin transaction...');
+
+      // Validate addresses
+      if (!_validateBitcoinAddress(toAddress)) {
+        throw Exception('Invalid recipient Bitcoin address');
+      }
+
       // Get UTXOs
       final utxos = await _getBitcoinUtxos(fromAddress, privateKeyHex);
       if (utxos.isEmpty) {
-        throw Exception('No UTXOs available');
+        throw Exception('No UTXOs available. Please wait for confirmations.');
       }
 
       // Convert amount to satoshis
       final amountSatoshis = (amount * 100000000).toInt();
 
+      // Calculate total available
+      final totalAvailable = utxos.fold<BigInt>(
+          BigInt.zero,
+              (sum, utxo) => sum + utxo.utxo.value
+      );
+
+      if (totalAvailable < BigInt.from(amountSatoshis)) {
+        throw Exception('Insufficient funds (have: ${totalAvailable / BigInt.from(100000000)} BTC)');
+      }
+
       // Create Bitcoin private key
       final privateKey = ECPrivate.fromHex(privateKeyHex);
 
-      // Build transaction
+      // Determine network
+      final network = _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet;
+
+      // Build transaction with dynamic fee
+      final estimatedSize = 250; // bytes (typical for 1 input, 2 outputs)
+      final feeSatoshis = (feeRate * estimatedSize).toInt();
+
       final txb = BitcoinTransactionBuilder(
         utxos: utxos,
         outPuts: [
           BitcoinOutput(
             address: P2pkhAddress.fromAddress(
               address: toAddress,
-              network: _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet,
+              network: network,
             ),
             value: BigInt.from(amountSatoshis),
           ),
         ],
-        fee: BigInt.from((feeRate * 250).toInt()),
-        network: _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet,
-        enableRBF: false,
+        fee: BigInt.from(feeSatoshis),
+        network: network,
+        enableRBF: true, // Enable Replace-By-Fee
       );
 
       // Sign transaction
@@ -148,49 +197,64 @@ class BlockchainService {
         return signature;
       });
 
-      // Broadcast
+      // Serialize and broadcast
       final txHex = transaction.serialize();
+      print('📋 Transaction hex length: ${txHex.length}');
+
       final txHash = await _broadcastBitcoinTransaction(txHex);
+      print('✅ Bitcoin transaction sent: $txHash');
+
+      // Clear balance cache to force refresh
+      _clearCacheForAddress(fromAddress, CoinType.btc);
 
       return txHash;
     } catch (e) {
       print('❌ Send Bitcoin error: $e');
-      throw Exception('Failed to send Bitcoin: $e');
+      throw Exception('Failed to send Bitcoin: ${_sanitizeErrorMessage(e.toString())}');
     }
   }
 
   Future<List<UtxoWithAddress>> _getBitcoinUtxos(String address, String privateKeyHex) async {
-    final url = _isMainnet
-        ? '${AppConstants.btcMainnetApi}/address/$address/utxo'
-        : '${AppConstants.btcTestnetApi}/address/$address/utxo';
+    try {
+      final url = _isMainnet
+          ? '${AppConstants.btcMainnetApi}/address/$address/utxo'
+          : '${AppConstants.btcTestnetApi}/address/$address/utxo';
 
-    final response = await http.get(Uri.parse(url));
+      final response = await _makeHttpRequest(url);
 
-    if (response.statusCode == 200) {
-      final utxos = json.decode(response.body) as List;
-      final privateKey = ECPrivate.fromHex(privateKeyHex);
-      final publicKey = privateKey.getPublic();
+      if (response != null && response.statusCode == 200) {
+        final utxos = json.decode(response.body) as List;
 
-      final network = _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet;
-      final p2pkhAddress = P2pkhAddress.fromAddress(address: address, network: network);
+        if (utxos.isEmpty) {
+          return [];
+        }
 
-      return utxos.map((u) {
-        return UtxoWithAddress(
-          utxo: BitcoinUtxo(
-            txHash: u['txid'],
-            value: BigInt.from(u['value']),
-            vout: u['vout'],
-            scriptType: p2pkhAddress.type,
-          ),
-          ownerDetails: UtxoAddressDetails(
-            publicKey: publicKey.toHex(),
-            address: p2pkhAddress,
-          ),
-        );
-      }).toList();
+        final privateKey = ECPrivate.fromHex(privateKeyHex);
+        final publicKey = privateKey.getPublic();
+        final network = _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet;
+        final p2pkhAddress = P2pkhAddress.fromAddress(address: address, network: network);
+
+        return utxos.map((u) {
+          return UtxoWithAddress(
+            utxo: BitcoinUtxo(
+              txHash: u['txid'],
+              value: BigInt.from(u['value'] ?? 0),
+              vout: u['vout'] ?? 0,
+              scriptType: p2pkhAddress.type,
+            ),
+            ownerDetails: UtxoAddressDetails(
+              publicKey: publicKey.toHex(),
+              address: p2pkhAddress,
+            ),
+          );
+        }).toList();
+      }
+
+      return [];
+    } catch (e) {
+      print('❌ Error fetching UTXOs: $e');
+      return [];
     }
-
-    return [];
   }
 
   Future<String> _broadcastBitcoinTransaction(String txHex) async {
@@ -198,17 +262,38 @@ class BlockchainService {
         ? '${AppConstants.btcMainnetApi}/tx'
         : '${AppConstants.btcTestnetApi}/tx';
 
-    final response = await http.post(
-      Uri.parse(url),
-      headers: {'Content-Type': 'text/plain'},
-      body: txHex,
-    );
+    try {
+      final response = await _httpClient.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'text/plain'},
+        body: txHex,
+      ).timeout(const Duration(seconds: 30));
 
-    if (response.statusCode == 200) {
-      return response.body;
+      if (response.statusCode == 200) {
+        return response.body.trim();
+      }
+
+      throw Exception('Failed to broadcast: ${response.body}');
+    } catch (e) {
+      throw Exception('Broadcast failed: ${_sanitizeErrorMessage(e.toString())}');
     }
+  }
 
-    throw Exception('Failed to broadcast: ${response.body}');
+  bool _validateBitcoinAddress(String address) {
+    try {
+      if (_isMainnet) {
+        return address.startsWith('1') || // P2PKH
+            address.startsWith('3') || // P2SH
+            address.startsWith('bc1'); // Bech32
+      } else {
+        return address.startsWith('m') || // P2PKH testnet
+            address.startsWith('n') || // P2PKH testnet
+            address.startsWith('2') || // P2SH testnet
+            address.startsWith('tb1'); // Bech32 testnet
+      }
+    } catch (e) {
+      return false;
+    }
   }
 
   // ====================
@@ -218,7 +303,7 @@ class BlockchainService {
   Future<double> getEthereumBalance(String address) async {
     try {
       final cacheKey = 'eth_balance_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 1))) {
+      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
         return _cache[cacheKey]!.data as double;
       }
 
@@ -227,6 +312,7 @@ class BlockchainService {
       final balanceEth = balance.getValueInUnit(web3dart.EtherUnit.ether);
 
       _cache[cacheKey] = _CachedData(balanceEth, DateTime.now());
+      print('✅ ETH Balance: $balanceEth');
       return balanceEth;
     } catch (e) {
       print('❌ ETH balance error: $e');
@@ -237,7 +323,7 @@ class BlockchainService {
   Future<List<Transaction>> getEthereumTransactions(String address) async {
     try {
       final cacheKey = 'eth_tx_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 2))) {
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
         return _cache[cacheKey]!.data as List<Transaction>;
       }
 
@@ -245,24 +331,39 @@ class BlockchainService {
       _lastEthApiCall = DateTime.now();
 
       final apiKey = AppConstants.etherscanApiKey;
-      if (apiKey.isEmpty) return [];
+      if (apiKey.isEmpty) {
+        print('⚠️ Etherscan API key not configured');
+        return [];
+      }
 
-      final chainId = _isMainnet ? 1 : 11155111;
-      final baseUrl = 'https://api.etherscan.io/v2/api';
+      final baseUrl = _isMainnet
+          ? AppConstants.ethMainnetEtherscanV2
+          : AppConstants.ethTestnetEtherscanV2;
 
-      final url = '$baseUrl?chainid=$chainId&module=account&action=txlist&address=$address&startblock=0&endblock=99999999&page=1&offset=20&sort=desc&apikey=$apiKey';
+      final url = '$baseUrl?module=account&action=txlist'
+          '&address=$address&startblock=0&endblock=99999999'
+          '&page=1&offset=20&sort=desc&apikey=$apiKey';
 
-      final response = await http.get(Uri.parse(url)).timeout(Duration(seconds: 15));
+      final response = await _makeHttpRequest(url);
 
-      if (response.statusCode == 200) {
+      if (response != null && response.statusCode == 200) {
         final data = json.decode(response.body);
+
         if (data['status'] == '1' && data['result'] is List) {
           final transactions = (data['result'] as List)
-              .map((tx) => Transaction.fromEtherscanV2(tx, address))
+              .map((tx) {
+            try {
+              return Transaction.fromEtherscanV2(tx, address);
+            } catch (e) {
+              print('⚠️ Error parsing ETH tx: $e');
+              return null;
+            }
+          })
               .whereType<Transaction>()
               .toList();
 
           _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+          print('✅ Fetched ${transactions.length} ETH transactions');
           return transactions;
         }
       }
@@ -280,41 +381,137 @@ class BlockchainService {
     required double amount,
   }) async {
     try {
+      print('📤 Preparing Ethereum transaction...');
+
+      // Validate address
+      if (!toAddress.startsWith('0x') || toAddress.length != 42) {
+        throw Exception('Invalid Ethereum address format');
+      }
+
       final credentials = web3dart.EthPrivateKey.fromHex(privateKey);
       final sender = await credentials.address;
       final recipient = web3dart.EthereumAddress.fromHex(toAddress);
 
+      // Check balance
+      final currentBalance = await getEthereumBalance(sender.hex);
+      if (currentBalance < amount) {
+        throw Exception('Insufficient ETH balance (have: $currentBalance ETH)');
+      }
+
+      // Convert amount to Wei
       final amountWei = BigInt.from((amount * 1e18).round());
       final amountInWei = web3dart.EtherAmount.inWei(amountWei);
 
-      final gasPrice = await _ethClient.getGasPrice();
-      BigInt gasLimit = BigInt.from(21000);
+      // Get gas price (with fallback)
+      web3dart.EtherAmount gasPrice;
+      try {
+        gasPrice = await _ethClient.getGasPrice();
+      } catch (e) {
+        print('⚠️ Using fallback gas price');
+        gasPrice = web3dart.EtherAmount.inWei(BigInt.from(20 * 1e9)); // 20 Gwei fallback
+      }
 
+      // Estimate gas limit
+      BigInt gasLimit = BigInt.from(21000); // Default for simple transfer
       try {
         gasLimit = await _ethClient.estimateGas(
           sender: sender,
           to: recipient,
           value: amountInWei,
         );
-      } catch (_) {}
+        // Add 10% buffer
+        gasLimit = (gasLimit * BigInt.from(110)) ~/ BigInt.from(100);
+      } catch (e) {
+        print('⚠️ Using default gas limit: $e');
+      }
 
+      // Calculate total cost
+      final totalCost = amountInWei.getInWei + (gasPrice.getInWei * gasLimit);
+      final totalCostEth = web3dart.EtherAmount.inWei(totalCost)
+          .getValueInUnit(web3dart.EtherUnit.ether);
+
+      if (currentBalance < totalCostEth) {
+        throw Exception('Insufficient balance for transaction + gas '
+            '(need: ${totalCostEth.toStringAsFixed(6)} ETH)');
+      }
+
+      // Create transaction
       final txData = web3dart.Transaction(
         to: recipient,
         value: amountInWei,
         gasPrice: gasPrice,
-        maxGas: (gasLimit.toDouble() * 1.2).round(),
+        maxGas: gasLimit.toInt(),
       );
 
+      // Send transaction
       final txHash = await _ethClient.sendTransaction(
         credentials,
         txData,
         chainId: _isMainnet ? 1 : 11155111,
       );
 
+      print('✅ Ethereum transaction sent: $txHash');
+
+      // Clear balance cache
+      _clearCacheForAddress(sender.hex, CoinType.eth);
+
       return txHash;
     } catch (e) {
       print('❌ Send Ethereum error: $e');
-      rethrow;
+      throw Exception('Failed to send Ethereum: ${_sanitizeErrorMessage(e.toString())}');
+    }
+  }
+
+  Future<GasFeeEstimate> estimateEthereumGasFee({
+    required String fromAddress,
+    required String toAddress,
+    required double amount,
+  }) async {
+    try {
+      final cacheKey = 'gas_fee_${fromAddress}_${toAddress}_$amount';
+      if (_isCacheValid(cacheKey, _feeCacheTTL)) {
+        return _cache[cacheKey]!.data as GasFeeEstimate;
+      }
+
+      final from = web3dart.EthereumAddress.fromHex(fromAddress);
+      final to = web3dart.EthereumAddress.fromHex(toAddress);
+      final value = web3dart.EtherAmount.inWei(BigInt.from((amount * 1e18).round()));
+
+      // Get gas price
+      web3dart.EtherAmount gasPrice;
+      try {
+        gasPrice = await _ethClient.getGasPrice();
+      } catch (e) {
+        gasPrice = web3dart.EtherAmount.inWei(BigInt.from(20 * 1e9)); // 20 Gwei
+      }
+
+      // Estimate gas limit
+      BigInt gasLimit = BigInt.from(21000);
+      try {
+        gasLimit = await _ethClient.estimateGas(
+            sender: from,
+            to: to,
+            value: value
+        );
+      } catch (e) {
+        print('⚠️ Using default gas limit');
+      }
+
+      final gasFee = gasPrice.getInWei * gasLimit;
+      final gasFeeEth = web3dart.EtherAmount.inWei(gasFee)
+          .getValueInUnit(web3dart.EtherUnit.ether);
+
+      final estimate = GasFeeEstimate(
+        gasLimit: gasLimit.toInt(),
+        gasPrice: gasPrice.getValueInUnit(web3dart.EtherUnit.gwei),
+        totalFee: gasFeeEth,
+      );
+
+      _cache[cacheKey] = _CachedData(estimate, DateTime.now());
+      return estimate;
+    } catch (e) {
+      print('❌ Gas estimation error: $e');
+      return GasFeeEstimate(gasLimit: 21000, gasPrice: 20.0, totalFee: 0.00042);
     }
   }
 
@@ -327,7 +524,7 @@ class BlockchainService {
       if (address.endsWith('unavailable')) return 0.0;
 
       final cacheKey = 'fil_balance_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 2))) {
+      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
         return _cache[cacheKey]!.data as double;
       }
 
@@ -336,7 +533,7 @@ class BlockchainService {
 
       final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
 
-      final response = await http.post(
+      final response = await _httpClient.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
@@ -345,22 +542,24 @@ class BlockchainService {
           'params': [address],
           'id': 1,
         }),
-      ).timeout(Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
 
         if (data['error'] != null) {
+          print('⚠️ Filecoin API error: ${data['error']}');
           return 0.0;
         }
 
         if (data['result'] != null) {
           final balanceStr = data['result'].toString().replaceAll('"', '');
           if (balanceStr.isNotEmpty && balanceStr != 'null') {
-            final balanceAttoFil = BigInt.parse(balanceStr);
+            final balanceAttoFil = BigInt.tryParse(balanceStr) ?? BigInt.zero;
             final balance = balanceAttoFil / BigInt.from(10).pow(18);
 
             _cache[cacheKey] = _CachedData(balance, DateTime.now());
+            print('✅ FIL Balance: $balance');
             return balance;
           }
         }
@@ -378,75 +577,48 @@ class BlockchainService {
       if (address.endsWith('unavailable')) return [];
 
       final cacheKey = 'fil_tx_$address';
-      if (_isCacheValid(cacheKey, Duration(minutes: 3))) {
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
         return _cache[cacheKey]!.data as List<Transaction>;
       }
 
-      await _respectRateLimit(_lastFilApiCall);
-      _lastFilApiCall = DateTime.now();
-
-      final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
-
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'jsonrpc': '2.0',
-          'method': 'Filecoin.StateListMessages',
-          'params': [{'To': address}, null, 0],
-          'id': 1,
-        }),
-      ).timeout(Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        if (data['error'] == null && data['result'] is List) {
-          final transactions = (data['result'] as List)
-              .take(20)
-              .map((tx) => Transaction.fromFilecoin(tx, address))
-              .whereType<Transaction>()
-              .toList();
-
-          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-          return transactions;
-        }
-      }
-
+      // Note: Filecoin transaction history is complex and may require
+      // additional implementation or third-party services
       return [];
     } catch (e) {
       print('❌ FIL transactions error: $e');
-      return _cache['fil_tx_$address']?.data as List<Transaction>? ?? [];
+      return [];
     }
   }
 
-  Future<GasFeeEstimate> estimateEthereumGasFee({
-    required String fromAddress,
-    required String toAddress,
-    required double amount,
-  }) async {
+  // ====================
+  // HELPER METHODS
+  // ====================
+
+  Future<http.Response?> _makeHttpRequest(String url, {int attempt = 1}) async {
     try {
-      final from = web3dart.EthereumAddress.fromHex(fromAddress);
-      final to = web3dart.EthereumAddress.fromHex(toAddress);
-      final value = web3dart.EtherAmount.inWei(BigInt.from((amount * 1e18).round()));
-
-      final gasPrice = await _ethClient.getGasPrice();
-      BigInt gasLimit = BigInt.from(21000);
-
-      try {
-        gasLimit = await _ethClient.estimateGas(sender: from, to: to, value: value);
-      } catch (_) {}
-
-      final gasFee = gasPrice.getInWei * gasLimit;
-      final gasFeeEth = web3dart.EtherAmount.inWei(gasFee).getValueInUnit(web3dart.EtherUnit.ether);
-
-      return GasFeeEstimate(
-        gasLimit: gasLimit.toInt(),
-        gasPrice: gasPrice.getValueInUnit(web3dart.EtherUnit.gwei),
-        totalFee: gasFeeEth,
+      final response = await _httpClient.get(Uri.parse(url)).timeout(
+        Duration(seconds: 10 + (attempt * 5)), // Increase timeout on retries
       );
+
+      if (response.statusCode == 429) {
+        // Rate limited - exponential backoff
+        if (attempt <= _maxRetries) {
+          final delay = Duration(seconds: attempt * 2);
+          print('⚠️ Rate limited, retrying in ${delay.inSeconds}s...');
+          await Future.delayed(delay);
+          return _makeHttpRequest(url, attempt: attempt + 1);
+        }
+      }
+
+      return response;
     } catch (e) {
-      return GasFeeEstimate(gasLimit: 21000, gasPrice: 20.0, totalFee: 0.00042);
+      if (attempt <= _maxRetries) {
+        print('⚠️ Request failed (attempt $attempt), retrying...');
+        await Future.delayed(Duration(seconds: attempt));
+        return _makeHttpRequest(url, attempt: attempt + 1);
+      }
+      print('❌ Request failed after $attempt attempts: $e');
+      return null;
     }
   }
 
@@ -465,6 +637,28 @@ class BlockchainService {
     return DateTime.now().difference(cached.timestamp) < maxAge;
   }
 
+  void _clearCacheForAddress(String address, CoinType coinType) {
+    final prefix = coinType.name;
+    _cache.removeWhere((key, value) =>
+    key.contains(address) && key.startsWith(prefix)
+    );
+  }
+
+  String _sanitizeErrorMessage(String error) {
+    // Remove sensitive information from error messages
+    if (error.contains('private')) {
+      return 'Authentication error';
+    }
+    if (error.contains('Invalid JSON')) {
+      return 'Network error';
+    }
+    // Truncate long errors
+    if (error.length > 100) {
+      return error.substring(0, 100) + '...';
+    }
+    return error;
+  }
+
   void clearCache() {
     _cache.clear();
     print('🗑️ Cache cleared');
@@ -472,15 +666,18 @@ class BlockchainService {
 
   void dispose() {
     _ethClient.dispose();
+    _httpClient.close();
   }
 }
 
+// Cache data wrapper
 class _CachedData {
   final dynamic data;
   final DateTime timestamp;
   _CachedData(this.data, this.timestamp);
 }
 
+// Gas fee estimate model
 class GasFeeEstimate {
   final int gasLimit;
   final double gasPrice;

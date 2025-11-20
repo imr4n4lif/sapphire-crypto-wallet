@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../providers/wallet_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../core/services/wallet_service.dart';
 import '../../core/services/blockchain_service.dart';
 import '../../core/constants/app_constants.dart';
 import '../splash_screen.dart';

@@ -439,7 +439,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                   lineTouchData: LineTouchData(
                     touchTooltipData: LineTouchTooltipData(
-                      tooltipBgColor: Theme.of(context).colorScheme.surface,
+                      getTooltipColor: (touchedSpot) =>
+                      Theme.of(context).colorScheme.surface,
                       getTooltipItems: (touchedSpots) {
                         return touchedSpots.map((spot) {
                           final date = filteredHistory[spot.x.toInt()].timestamp;
