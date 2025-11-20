@@ -324,7 +324,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final minValue = filteredHistory.map((p) => p.value).reduce((a, b) => a < b ? a : b);
     final maxValue = filteredHistory.map((p) => p.value).reduce((a, b) => a > b ? a : b);
     final valueRange = maxValue - minValue;
-    final buffer = valueRange * 0.1;
+    final buffer = valueRange > 0 ? valueRange * 0.1 : 1.0;
 
     return Card(
       child: Padding(
@@ -366,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   gridData: FlGridData(
                     show: true,
                     drawVerticalLine: false,
-                    horizontalInterval: (maxValue - minValue) / 3,
+                    horizontalInterval: valueRange > 0 ? (maxValue - minValue) / 3 : 1.0,
                     getDrawingHorizontalLine: (value) {
                       return FlLine(
                         color: Colors.grey.withOpacity(0.2),
@@ -379,7 +379,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 45,
-                        interval: (maxValue - minValue) / 3,
+                        interval: valueRange > 0 ? (maxValue - minValue) / 3 : 1.0,
                         getTitlesWidget: (value, meta) {
                           return Padding(
                             padding: const EdgeInsets.only(right: 8),
@@ -602,11 +602,560 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-// Wallet Menu Bottom Sheet (same as before, omitted for brevity - no changes needed)
+// ============================================================================
+// WALLET MENU BOTTOM SHEET - NOW FULLY IMPLEMENTED
+// ============================================================================
+
 class _WalletMenuSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    // Same implementation as in your original code
-    return Container();
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        child: Consumer<WalletProvider>(
+          builder: (context, walletProvider, _) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Handle bar
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+
+                // Header
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'My Wallets',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const Divider(height: 1),
+
+                // Wallet List
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: walletProvider.allWallets.length,
+                    itemBuilder: (context, index) {
+                      final wallet = walletProvider.allWallets[index];
+                      final walletId = wallet['id'] as String;
+                      final walletName = wallet['name'] as String;
+                      final isSelected = walletId == walletProvider.currentWalletId;
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                          child: Text(
+                            walletName[0].toUpperCase(),
+                            style: TextStyle(
+                              color: isSelected
+                                  ? Colors.white
+                                  : Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          walletName,
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${(wallet['ethAddress'] as String).substring(0, 10)}...',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        trailing: isSelected
+                            ? Icon(
+                          Icons.check_circle,
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                            : PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert),
+                          onSelected: (value) async {
+                            if (value == 'rename') {
+                              _showRenameDialog(context, walletProvider, walletId, walletName);
+                            } else if (value == 'delete') {
+                              _showDeleteDialog(context, walletProvider, walletId, walletName);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(
+                              value: 'rename',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit_outlined, size: 20),
+                                  SizedBox(width: 12),
+                                  Text('Rename'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                  SizedBox(width: 12),
+                                  Text('Delete', style: TextStyle(color: Colors.red)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        onTap: isSelected
+                            ? null
+                            : () async {
+                          Navigator.pop(context);
+                          await walletProvider.switchWallet(walletId);
+                        },
+                      );
+                    },
+                  ),
+                ),
+
+                const Divider(height: 1),
+
+                // Add Wallet Buttons
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _showCreateWalletDialog(context, walletProvider);
+                          },
+                          icon: const Icon(Icons.add),
+                          label: const Text('Create New Wallet'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _showImportWalletDialog(context, walletProvider);
+                          },
+                          icon: const Icon(Icons.download_outlined),
+                          label: const Text('Import Wallet'),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showCreateWalletDialog(BuildContext context, WalletProvider walletProvider) {
+    final controller = TextEditingController(text: 'Wallet ${walletProvider.allWallets.length + 1}');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Create New Wallet'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Wallet Name',
+            hintText: 'Enter wallet name',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a wallet name')),
+                );
+                return;
+              }
+
+              Navigator.pop(context);
+
+              // Show loading
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator()),
+              );
+
+              try {
+                final mnemonic = await walletProvider.createNewWallet(name);
+
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  _showSeedPhraseDialog(context, mnemonic);
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showImportWalletDialog(BuildContext context, WalletProvider walletProvider) {
+    final nameController = TextEditingController(text: 'Imported Wallet ${walletProvider.allWallets.length + 1}');
+    final mnemonicController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Import Wallet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
+                labelText: 'Wallet Name',
+                hintText: 'Enter wallet name',
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: mnemonicController,
+              decoration: const InputDecoration(
+                labelText: 'Seed Phrase',
+                hintText: 'Enter 12-word seed phrase',
+              ),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final mnemonic = mnemonicController.text.trim();
+
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a wallet name')),
+                );
+                return;
+              }
+
+              if (mnemonic.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter seed phrase')),
+                );
+                return;
+              }
+
+              Navigator.pop(context);
+
+              // Show loading
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator()),
+              );
+
+              try {
+                await walletProvider.importExistingWallet(name, mnemonic);
+
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ Wallet imported successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Import'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSeedPhraseDialog(BuildContext context, String mnemonic) {
+    final words = mnemonic.split(' ');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('⚠️ Save Your Seed Phrase'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red),
+                ),
+                child: const Text(
+                  'Write down these 12 words and store them safely. You\'ll need them to recover your wallet.',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemCount: words.length,
+                itemBuilder: (context, index) {
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          '${index + 1}.',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            words[index],
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: mnemonic));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Seed phrase copied')),
+                    );
+                  },
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy to Clipboard'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('I\'ve Saved It'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRenameDialog(BuildContext context, WalletProvider walletProvider, String walletId, String currentName) {
+    final controller = TextEditingController(text: currentName);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename Wallet'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: 'Wallet Name',
+            hintText: 'Enter new name',
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a wallet name')),
+                );
+                return;
+              }
+
+              await walletProvider.updateWalletName(walletId, newName);
+
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('✅ Wallet renamed successfully'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WalletProvider walletProvider, String walletId, String walletName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Wallet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Are you sure you want to delete "$walletName"?'),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red),
+              ),
+              child: const Text(
+                'Make sure you have backed up your seed phrase. This action cannot be undone.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+
+              // Show loading
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => const Center(child: CircularProgressIndicator()),
+              );
+
+              try {
+                await walletProvider.deleteWalletById(walletId);
+
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('✅ Wallet deleted successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  Navigator.pop(context); // Close loading
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Error: $e'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 }
