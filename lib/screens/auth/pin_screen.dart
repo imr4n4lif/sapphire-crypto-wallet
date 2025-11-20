@@ -25,15 +25,15 @@ class _PinScreenState extends State<PinScreen> {
   bool _isConfirming = false;
   String _error = '';
   bool _hasTriedBiometric = false;
+  bool _isBiometricInProgress = false;
 
   @override
   void initState() {
     super.initState();
-    // Try biometric authentication automatically when entering verify mode
+    // Trigger biometric auth only in verify mode
     if (widget.mode == PinScreenMode.verify) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        // Add delay to ensure screen is fully rendered
-        await Future.delayed(const Duration(milliseconds: 800));
+        await Future.delayed(const Duration(milliseconds: 500));
         if (mounted) {
           _tryBiometricAuth();
         }
@@ -50,54 +50,49 @@ class _PinScreenState extends State<PinScreen> {
     return 'Enter PIN';
   }
 
-  // Automatic biometric authentication with improved handling
   Future<void> _tryBiometricAuth() async {
-    if (_hasTriedBiometric) {
-      print('🔐 Already tried biometric auth, skipping');
+    if (_hasTriedBiometric || _isBiometricInProgress) {
       return;
     }
-    _hasTriedBiometric = true;
 
     final authProvider = context.read<AuthProvider>();
 
-    print('🔐 Biometric Status:');
-    print('  - Available: ${authProvider.biometricAvailable}');
-    print('  - Enabled: ${authProvider.biometricEnabled}');
-    print('  - Type: ${authProvider.biometricType}');
-
-    // Only try if biometric is enabled and available
-    if (!authProvider.biometricEnabled) {
-      print('⚠️ Biometric not enabled in settings');
-      return;
-    }
-
-    if (!authProvider.biometricAvailable) {
-      print('⚠️ Biometric not available on device');
+    if (!authProvider.biometricEnabled || !authProvider.biometricAvailable) {
       return;
     }
 
     if (!mounted) return;
 
-    print('🔐 Attempting biometric authentication...');
+    setState(() {
+      _hasTriedBiometric = true;
+      _isBiometricInProgress = true;
+    });
 
     try {
+      print('🔐 Attempting biometric authentication...');
       final authenticated = await authProvider.authenticateWithBiometric();
-      print('🔐 Biometric result: $authenticated');
 
-      if (authenticated && mounted) {
-        print('✅ Biometric authentication successful');
-        if (widget.onSuccess != null) {
-          widget.onSuccess!();
+      if (mounted) {
+        setState(() => _isBiometricInProgress = false);
+
+        if (authenticated) {
+          print('✅ Biometric authentication successful');
+          if (widget.onSuccess != null) {
+            widget.onSuccess!();
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const HomeScreen()),
+            );
+          }
         } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const HomeScreen()),
-          );
+          print('❌ Biometric authentication failed');
         }
-      } else {
-        print('❌ Biometric authentication failed or cancelled');
       }
     } catch (e) {
       print('❌ Biometric authentication error: $e');
+      if (mounted) {
+        setState(() => _isBiometricInProgress = false);
+      }
     }
   }
 
@@ -190,14 +185,20 @@ class _PinScreenState extends State<PinScreen> {
   }
 
   Future<void> _useBiometric() async {
+    if (_isBiometricInProgress) return;
+
+    setState(() => _isBiometricInProgress = true);
+
     final authProvider = context.read<AuthProvider>();
     final authenticated = await authProvider.authenticateWithBiometric();
 
-    if (authenticated) {
-      if (widget.onSuccess != null) {
-        widget.onSuccess!();
-      } else {
-        if (mounted) {
+    if (mounted) {
+      setState(() => _isBiometricInProgress = false);
+
+      if (authenticated) {
+        if (widget.onSuccess != null) {
+          widget.onSuccess!();
+        } else {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const HomeScreen()),
           );
@@ -260,7 +261,9 @@ class _PinScreenState extends State<PinScreen> {
                 authProvider.biometricAvailable)
               Padding(
                 padding: const EdgeInsets.only(bottom: 30),
-                child: TextButton.icon(
+                child: _isBiometricInProgress
+                    ? const CircularProgressIndicator()
+                    : TextButton.icon(
                   onPressed: _useBiometric,
                   icon: const Icon(Icons.fingerprint),
                   label: Text('Use ${authProvider.biometricType}'),

@@ -27,16 +27,14 @@ class CoinIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = color ?? Theme.of(context).colorScheme.primary;
-
     return SvgPicture.asset(
       _getSvgPath(),
       width: size,
       height: size,
-      // colorFilter: ColorFilter.mode(
-      //   iconColor,
-      //   BlendMode.srcIn,
-      // ),
+      // Use colorFilter only if color is provided
+      colorFilter: color != null
+          ? ColorFilter.mode(color!, BlendMode.srcIn)
+          : null,
     );
   }
 }

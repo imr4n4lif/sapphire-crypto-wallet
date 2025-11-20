@@ -16,7 +16,6 @@ class WalletProvider with ChangeNotifier {
   final SecureStorageService _storage = SecureStorageService();
   final NotificationService _notificationService = NotificationService();
 
-  // Multi-wallet support
   List<Map<String, dynamic>> _allWallets = [];
   String? _currentWalletId;
 
@@ -28,8 +27,8 @@ class WalletProvider with ChangeNotifier {
   Map<CoinType, List<Transaction>> _transactions = {};
   Map<CoinType, String> _lastKnownTxHash = {};
 
-  // Wallet-specific portfolio history
-  Map<String, List<double>> _walletPortfolioHistory = {};
+  // Portfolio history - now time-based
+  Map<String, List<PortfolioDataPoint>> _walletPortfolioHistory = {};
 
   Timer? _autoRefreshTimer;
   static const Duration _refreshInterval = Duration(minutes: 5);
@@ -45,11 +44,10 @@ class WalletProvider with ChangeNotifier {
   String? get currentWalletName => _getCurrentWalletName();
 
   double get totalPortfolioValue {
-    final total = _balances.values.fold(0.0, (sum, balance) => sum + balance.usdValue);
-    return total;
+    return _balances.values.fold(0.0, (sum, balance) => sum + balance.usdValue);
   }
 
-  List<double> get currentWalletPortfolioHistory {
+  List<PortfolioDataPoint> get currentWalletPortfolioHistory {
     if (_currentWalletId == null) return [];
     return _walletPortfolioHistory[_currentWalletId!] ?? [];
   }
@@ -68,15 +66,12 @@ class WalletProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      print('🔄 Initializing wallet provider...');
-
       _isMainnet = await _storage.readBool(AppConstants.keyIsMainnet, defaultValue: true);
       _blockchainService.initialize(_isMainnet);
 
       await _loadAllWallets();
       _currentWalletId = await _storage.readString('current_wallet_id');
 
-      // Load portfolio history
       await _loadPortfolioHistory();
 
       if (_allWallets.isNotEmpty) {
@@ -90,8 +85,6 @@ class WalletProvider with ChangeNotifier {
         await refreshTransactions();
 
         _startAutoRefresh();
-      } else {
-        print('ℹ️ No wallets found');
       }
     } catch (e) {
       print('❌ Error initializing wallet: $e');
@@ -107,17 +100,14 @@ class WalletProvider with ChangeNotifier {
       try {
         final List<dynamic> decoded = json.decode(walletsJson);
         _allWallets = decoded.cast<Map<String, dynamic>>();
-        print('✅ Loaded ${_allWallets.length} wallets');
       } catch (e) {
-        print('❌ Error loading wallets: $e');
         _allWallets = [];
       }
     }
   }
 
   Future<void> _saveAllWallets() async {
-    final encoded = json.encode(_allWallets);
-    await _storage.saveString('all_wallets', encoded);
+    await _storage.saveString('all_wallets', json.encode(_allWallets));
   }
 
   Future<void> _loadPortfolioHistory() async {
@@ -125,18 +115,26 @@ class WalletProvider with ChangeNotifier {
     if (historyJson != null) {
       try {
         final Map<String, dynamic> decoded = json.decode(historyJson);
-        _walletPortfolioHistory = decoded.map((key, value) =>
-            MapEntry(key, List<double>.from(value as List)));
-        print('✅ Loaded portfolio history for ${_walletPortfolioHistory.length} wallets');
+        _walletPortfolioHistory = decoded.map((key, value) {
+          final points = (value as List).map((p) => PortfolioDataPoint(
+            timestamp: DateTime.parse(p['timestamp']),
+            value: p['value'].toDouble(),
+          )).toList();
+          return MapEntry(key, points);
+        });
       } catch (e) {
-        print('❌ Error loading portfolio history: $e');
         _walletPortfolioHistory = {};
       }
     }
   }
 
   Future<void> _savePortfolioHistory() async {
-    final encoded = json.encode(_walletPortfolioHistory);
+    final encoded = json.encode(_walletPortfolioHistory.map((key, value) {
+      return MapEntry(key, value.map((p) => {
+        'timestamp': p.timestamp.toIso8601String(),
+        'value': p.value,
+      }).toList());
+    }));
     await _storage.saveString('portfolio_history', encoded);
   }
 
@@ -147,12 +145,14 @@ class WalletProvider with ChangeNotifier {
       _walletPortfolioHistory[_currentWalletId!] = [];
     }
 
-    _walletPortfolioHistory[_currentWalletId!]!.add(value);
+    final now = DateTime.now();
+    final history = _walletPortfolioHistory[_currentWalletId!]!;
 
-    // Keep only last 50 data points
-    if (_walletPortfolioHistory[_currentWalletId!]!.length > 50) {
-      _walletPortfolioHistory[_currentWalletId!]!.removeAt(0);
-    }
+    // Remove entries older than 1 year
+    history.removeWhere((p) => now.difference(p.timestamp).inDays > 365);
+
+    // Add new entry
+    history.add(PortfolioDataPoint(timestamp: now, value: value));
 
     _savePortfolioHistory();
   }
@@ -162,14 +162,11 @@ class WalletProvider with ChangeNotifier {
 
     final mnemonic = await _storage.readSecure('mnemonic_$_currentWalletId');
     if (mnemonic != null) {
-      print('✅ Loading wallet: $_currentWalletId');
       _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
     }
   }
 
   Future<String> createNewWallet(String name) async {
-    print('🆕 Creating new wallet: $name');
-
     try {
       final mnemonic = _walletService.generateMnemonic();
       final walletData = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
@@ -192,14 +189,11 @@ class WalletProvider with ChangeNotifier {
 
       return mnemonic;
     } catch (e) {
-      print('❌ Failed to create wallet: $e');
       throw Exception('Failed to create wallet: $e');
     }
   }
 
   Future<void> importExistingWallet(String name, String mnemonic) async {
-    print('📥 Importing wallet: $name');
-
     try {
       if (!_walletService.validateMnemonic(mnemonic)) {
         throw Exception('Invalid mnemonic phrase');
@@ -221,29 +215,21 @@ class WalletProvider with ChangeNotifier {
 
       await _saveAllWallets();
       await switchWallet(walletId);
-
-      print('✅ Wallet imported successfully');
     } catch (e) {
-      print('❌ Failed to import wallet: $e');
       throw Exception('Failed to import wallet: $e');
     }
   }
 
   Future<void> updateWalletName(String walletId, String newName) async {
-    print('✏️ Updating wallet name: $walletId -> $newName');
-
     final index = _allWallets.indexWhere((w) => w['id'] == walletId);
     if (index != -1) {
       _allWallets[index]['name'] = newName;
       await _saveAllWallets();
       notifyListeners();
-      print('✅ Wallet name updated');
     }
   }
 
   Future<void> switchWallet(String walletId) async {
-    print('🔄 Switching to wallet: $walletId');
-
     _currentWalletId = walletId;
     await _storage.saveString('current_wallet_id', walletId);
 
@@ -255,8 +241,6 @@ class WalletProvider with ChangeNotifier {
   }
 
   Future<void> deleteWalletById(String walletId) async {
-    print('🗑️ Deleting wallet: $walletId');
-
     if (_allWallets.length == 1) {
       throw Exception('Cannot delete the only wallet');
     }
@@ -278,14 +262,10 @@ class WalletProvider with ChangeNotifier {
   void _startAutoRefresh() {
     _stopAutoRefresh();
 
-    print('⏰ Starting auto-refresh (every ${_refreshInterval.inMinutes} minutes)');
     _autoRefreshTimer = Timer.periodic(_refreshInterval, (timer) async {
       if (!_isRefreshing) {
-        print('🔄 Auto-refreshing wallet data...');
         await refreshBalances();
         await refreshTransactions();
-      } else {
-        print('⏭️ Skipping auto-refresh (already refreshing)');
       }
     });
   }
@@ -300,7 +280,6 @@ class WalletProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      print('🆕 Creating new wallet...');
       final mnemonic = _walletService.generateMnemonic();
       _wallet = await _walletService.createWalletFromMnemonic(mnemonic, _isMainnet);
 
@@ -329,12 +308,10 @@ class WalletProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
 
-      print('✅ Wallet created successfully');
       return mnemonic;
     } catch (e) {
       _isLoading = false;
       notifyListeners();
-      print('❌ Failed to create wallet: $e');
       throw Exception('Failed to create wallet: $e');
     }
   }
@@ -344,8 +321,6 @@ class WalletProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      print('📥 Importing wallet...');
-
       if (!_walletService.validateMnemonic(mnemonic)) {
         throw Exception('Invalid mnemonic phrase');
       }
@@ -377,19 +352,14 @@ class WalletProvider with ChangeNotifier {
 
       _isLoading = false;
       notifyListeners();
-
-      print('✅ Wallet imported successfully');
     } catch (e) {
       _isLoading = false;
       notifyListeners();
-      print('❌ Failed to import wallet: $e');
       throw Exception('Failed to import wallet: $e');
     }
   }
 
   Future<void> deleteWallet() async {
-    print('🗑️ Deleting all wallets...');
-
     _stopAutoRefresh();
     _blockchainService.clearCache();
 
@@ -410,13 +380,9 @@ class WalletProvider with ChangeNotifier {
     _lastKnownTxHash.clear();
     _walletPortfolioHistory.clear();
     notifyListeners();
-
-    print('✅ All wallets deleted');
   }
 
   Future<void> toggleNetwork() async {
-    print('🔄 Toggling network...');
-
     _isMainnet = !_isMainnet;
     await _storage.saveBool(AppConstants.keyIsMainnet, _isMainnet);
     _blockchainService.initialize(_isMainnet);
@@ -432,30 +398,19 @@ class WalletProvider with ChangeNotifier {
     await refreshBalances();
     await refreshTransactions();
     notifyListeners();
-
-    print('✅ Switched to ${_isMainnet ? "Mainnet" : "Testnet"}');
   }
 
   Future<void> refreshBalances() async {
-    if (_wallet == null) {
-      print('⚠️ No wallet to refresh');
-      return;
-    }
-
-    if (_isRefreshing) {
-      print('⏭️ Already refreshing, skipping...');
-      return;
-    }
+    if (_wallet == null || _isRefreshing) return;
 
     _isRefreshing = true;
     notifyListeners();
 
     try {
-      print('🔄 Refreshing balances...');
-
-      print('💲 Fetching crypto prices...');
+      // Fetch prices first (parallel)
       final prices = await _priceService.fetchAllPrices();
 
+      // Fetch balances (with delays)
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
       await Future.delayed(const Duration(milliseconds: 500));
 
@@ -468,38 +423,31 @@ class WalletProvider with ChangeNotifier {
       final ethPrice = prices[CoinType.eth]?.price ?? 0.0;
       final filPrice = prices[CoinType.fil]?.price ?? 0.0;
 
-      final btcUsd = btcBalance * btcPrice;
-      final ethUsd = ethBalance * ethPrice;
-      final filUsd = filBalance * filPrice;
-
       _balances = {
         CoinType.btc: CoinBalance(
           coinType: CoinType.btc,
           balance: btcBalance,
           pricePerCoin: btcPrice,
-          usdValue: btcUsd,
+          usdValue: btcBalance * btcPrice,
           change24h: prices[CoinType.btc]?.change24h ?? 0.0,
         ),
         CoinType.eth: CoinBalance(
           coinType: CoinType.eth,
           balance: ethBalance,
           pricePerCoin: ethPrice,
-          usdValue: ethUsd,
+          usdValue: ethBalance * ethPrice,
           change24h: prices[CoinType.eth]?.change24h ?? 0.0,
         ),
         CoinType.fil: CoinBalance(
           coinType: CoinType.fil,
           balance: filBalance,
           pricePerCoin: filPrice,
-          usdValue: filUsd,
+          usdValue: filBalance * filPrice,
           change24h: prices[CoinType.fil]?.change24h ?? 0.0,
         ),
       };
 
-      // Update portfolio history
       _updatePortfolioHistory(totalPortfolioValue);
-
-      print('✅ Balances refreshed - Total: \$${totalPortfolioValue.toStringAsFixed(2)}');
     } catch (e) {
       print('❌ Error refreshing balances: $e');
     } finally {
@@ -508,46 +456,15 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  void _checkForNewTransactions(CoinType coinType, List<Transaction> newTxs) {
-    if (newTxs.isEmpty) return;
-
-    final latestTx = newTxs.first;
-    final lastKnownHash = _lastKnownTxHash[coinType];
-
-    if (lastKnownHash != null &&
-        lastKnownHash != latestTx.hash &&
-        latestTx.isIncoming) {
-      print('🔔 New incoming transaction detected for ${coinType.name}');
-
-      _notificationService.showTransactionReceived(
-        coinSymbol: CoinInfo.allCoins.firstWhere((c) => c.type == coinType).symbol,
-        amount: latestTx.amount,
-        txHash: latestTx.hash,
-      );
-    }
-
-    _lastKnownTxHash[coinType] = latestTx.hash;
-  }
-
   Future<void> refreshTransactions() async {
-    if (_wallet == null) {
-      print('⚠️ No wallet to refresh transactions');
-      return;
-    }
-
-    if (_isRefreshing) {
-      print('⏭️ Already refreshing, skipping transactions...');
-      return;
-    }
+    if (_wallet == null || _isRefreshing) return;
 
     try {
-      print('🔄 Refreshing transactions...');
-
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 1000));
+      await Future.delayed(const Duration(milliseconds: 800));
 
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 1000));
+      await Future.delayed(const Duration(milliseconds: 800));
 
       final filTxs = await _blockchainService.getFilecoinTransactions(_wallet!.filAddress);
 
@@ -561,11 +478,29 @@ class WalletProvider with ChangeNotifier {
         CoinType.fil: filTxs,
       };
 
-      print('✅ Transactions refreshed - BTC: ${btcTxs.length}, ETH: ${ethTxs.length}, FIL: ${filTxs.length}');
       notifyListeners();
     } catch (e) {
       print('❌ Error refreshing transactions: $e');
     }
+  }
+
+  void _checkForNewTransactions(CoinType coinType, List<Transaction> newTxs) {
+    if (newTxs.isEmpty) return;
+
+    final latestTx = newTxs.first;
+    final lastKnownHash = _lastKnownTxHash[coinType];
+
+    if (lastKnownHash != null &&
+        lastKnownHash != latestTx.hash &&
+        latestTx.isIncoming) {
+      _notificationService.showTransactionReceived(
+        coinSymbol: CoinInfo.allCoins.firstWhere((c) => c.type == coinType).symbol,
+        amount: latestTx.amount,
+        txHash: latestTx.hash,
+      );
+    }
+
+    _lastKnownTxHash[coinType] = latestTx.hash;
   }
 
   Future<String> sendTransaction({
@@ -576,7 +511,6 @@ class WalletProvider with ChangeNotifier {
     if (_wallet == null) throw Exception('No wallet found');
 
     try {
-      print('💸 Sending transaction...');
       String txHash;
 
       switch (coinType) {
@@ -584,8 +518,9 @@ class WalletProvider with ChangeNotifier {
           txHash = await _blockchainService.sendBitcoin(
             fromAddress: _wallet!.btcAddress,
             toAddress: toAddress,
-            privateKey: _wallet!.btcPrivateKey,
+            privateKeyHex: _wallet!.btcPrivateKey,
             amount: amount,
+            feeRate: 10.0, // sats/byte
           );
           break;
         case CoinType.eth:
@@ -596,16 +531,8 @@ class WalletProvider with ChangeNotifier {
           );
           break;
         case CoinType.fil:
-          txHash = await _blockchainService.sendFilecoin(
-            fromAddress: _wallet!.filAddress,
-            toAddress: toAddress,
-            privateKey: _wallet!.filPrivateKey,
-            amount: amount,
-          );
-          break;
+          throw UnimplementedError('Filecoin sending not yet implemented');
       }
-
-      print('✅ Transaction sent: $txHash');
 
       await _notificationService.showTransactionSent(
         coinSymbol: CoinInfo.allCoins.firstWhere((c) => c.type == coinType).symbol,
@@ -620,7 +547,6 @@ class WalletProvider with ChangeNotifier {
 
       return txHash;
     } catch (e) {
-      print('❌ Failed to send transaction: $e');
       throw Exception('Failed to send transaction: $e');
     }
   }
@@ -638,4 +564,11 @@ class WalletProvider with ChangeNotifier {
     _stopAutoRefresh();
     super.dispose();
   }
+}
+
+class PortfolioDataPoint {
+  final DateTime timestamp;
+  final double value;
+
+  PortfolioDataPoint({required this.timestamp, required this.value});
 }

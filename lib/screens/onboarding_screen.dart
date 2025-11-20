@@ -11,12 +11,15 @@ class OnboardingScreen extends StatelessWidget {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
+          // Always allow scrolling, even if less than view size
+          physics: const AlwaysScrollableScrollPhysics(),
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
+              mainAxisSize: MainAxisSize.min, // Ensures column adapts to children
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const SizedBox(height: 40),
-
                 // ---- SVG LOGO (Color from Theme) ----
                 SvgPicture.asset(
                   "assets/icons/logo.svg",
@@ -27,9 +30,7 @@ class OnboardingScreen extends StatelessWidget {
                     BlendMode.srcIn,
                   ),
                 ),
-
                 const SizedBox(height: 30),
-
                 Text(
                   'Welcome to Sapphire Wallet',
                   style: Theme.of(context).textTheme.displaySmall,
@@ -41,9 +42,7 @@ class OnboardingScreen extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodyLarge,
                   textAlign: TextAlign.center,
                 ),
-
                 const SizedBox(height: 40),
-
                 const _FeatureCard(
                   icon: Icons.shield_outlined,
                   title: 'Fully Secure',
@@ -61,9 +60,7 @@ class OnboardingScreen extends StatelessWidget {
                   title: 'Multi-Chain',
                   subtitle: 'Support for BTC, ETH, and FIL',
                 ),
-
                 const SizedBox(height: 40),
-
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -79,7 +76,6 @@ class OnboardingScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -101,8 +97,7 @@ class OnboardingScreen extends StatelessWidget {
                     child: const Text('Import Existing Wallet'),
                   ),
                 ),
-
-                const SizedBox(height: 30),
+                const SizedBox(height: 16), // Reduced from 30 to 16 to prevent overscroll
               ],
             ),
           ),
@@ -140,12 +135,12 @@ class _FeatureCard extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               icon,
               color: Theme.of(context).colorScheme.primary,
-              size: 28,
+              size: 32,
             ),
           ),
           const SizedBox(width: 16),
@@ -157,9 +152,10 @@ class _FeatureCard extends StatelessWidget {
                   title,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
+                const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
             ),

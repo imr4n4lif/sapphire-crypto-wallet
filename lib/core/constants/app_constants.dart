@@ -15,7 +15,7 @@ class AppConstants {
 
   // BIP44 Derivation Paths
   static const String btcMainnetPath = "m/44'/0'/0'/0/0";
-  static const String btcTestnetPath = "m/44'/1'/0'/0/0"; // testnet4 compatible
+  static const String btcTestnetPath = "m/44'/1'/0'/0/0";
 
   static const String ethPath = "m/44'/60'/0'/0/0";
   static const String filPath = "m/44'/461'/0'/0/0";
@@ -28,32 +28,32 @@ class AppConstants {
   static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
   static String get ethTestnetRpc => 'https://sepolia.infura.io/v3/$infuraProjectId';
 
-  // Bitcoin (using mempool.space API for testnet4)
+  // Bitcoin
   static const String btcMainnetApi = 'https://blockstream.info/api';
-  static const String btcTestnetApi = 'https://mempool.space/testnet4/api'; // testnet4
+  static const String btcTestnetApi = 'https://mempool.space/testnet4/api';
 
-  // Etherscan API for transaction history (V2)
+  // Etherscan API
   static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/api';
   static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/api';
 
-  // Filecoin (using public RPC)
+  // Filecoin
   static const String filMainnetRpc = 'https://api.node.glif.io';
   static const String filTestnetRpc = 'https://api.calibration.node.glif.io';
 
   // Price API
   static const String priceApiUrl = 'https://api.coingecko.com/api/v3';
 
-  // Coin IDs for price fetching
+  // Coin IDs
   static const String btcCoinId = 'bitcoin';
   static const String ethCoinId = 'ethereum';
   static const String filCoinId = 'filecoin';
 
-  // Transaction confirmations required
+  // Confirmations
   static const int btcConfirmations = 3;
   static const int ethConfirmations = 12;
   static const int filConfirmations = 30;
 
-  // Decimal places
+  // Decimals
   static const int btcDecimals = 8;
   static const int ethDecimals = 18;
   static const int filDecimals = 18;
@@ -105,4 +105,29 @@ class CoinInfo {
   );
 
   static List<CoinInfo> get allCoins => [btc, eth, fil];
+}
+
+// Helper functions for wallet service
+class WalletHelper {
+  static String getPrivateKey(dynamic wallet, CoinType coinType) {
+    switch (coinType) {
+      case CoinType.btc:
+        return wallet.btcPrivateKey;
+      case CoinType.eth:
+        return wallet.ethPrivateKey;
+      case CoinType.fil:
+        return wallet.filPrivateKey;
+    }
+  }
+
+  static String getAddress(dynamic wallet, CoinType coinType) {
+    switch (coinType) {
+      case CoinType.btc:
+        return wallet.btcAddress;
+      case CoinType.eth:
+        return wallet.ethAddress;
+      case CoinType.fil:
+        return wallet.filAddress;
+    }
+  }
 }

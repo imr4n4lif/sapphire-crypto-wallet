@@ -1,5 +1,4 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter/foundation.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -9,7 +8,6 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
-  // Initialize notifications
   Future<void> initialize() async {
     if (_initialized) return;
 
@@ -30,7 +28,6 @@ class NotificationService {
     }
   }
 
-  // Create notification channel for Android 8.0+
   Future<void> _createNotificationChannel() async {
     const androidChannel = AndroidNotificationChannel(
       'transaction_channel',
@@ -46,12 +43,10 @@ class NotificationService {
         ?.createNotificationChannel(androidChannel);
   }
 
-  // Handle notification tap
   void _onNotificationTap(NotificationResponse response) {
     print('Notification tapped: ${response.payload}');
   }
 
-  // Show transaction received notification
   Future<void> showTransactionReceived({
     required String coinSymbol,
     required double amount,
@@ -78,7 +73,7 @@ class NotificationService {
 
     try {
       await _notifications.show(
-        txHash.hashCode.abs() % 2147483647, // Ensure valid notification ID
+        txHash.hashCode.abs() % 2147483647,
         '✅ Received $coinSymbol',
         'You received $amount $coinSymbol',
         details,
@@ -90,7 +85,6 @@ class NotificationService {
     }
   }
 
-  // Show transaction sent notification
   Future<void> showTransactionSent({
     required String coinSymbol,
     required double amount,
@@ -129,7 +123,6 @@ class NotificationService {
     }
   }
 
-  // Show transaction confirmed notification
   Future<void> showTransactionConfirmed({
     required String coinSymbol,
     required String txHash,
@@ -165,7 +158,6 @@ class NotificationService {
     }
   }
 
-  // Request notification permissions (Android 13+)
   Future<bool> requestPermissions() async {
     if (!_initialized) {
       await initialize();
@@ -188,7 +180,6 @@ class NotificationService {
     return false;
   }
 
-  // Test notification (for debugging)
   Future<void> showTestNotification() async {
     await showTransactionReceived(
       coinSymbol: 'ETH',
@@ -197,7 +188,6 @@ class NotificationService {
     );
   }
 
-  // Cancel all notifications
   Future<void> cancelAll() async {
     await _notifications.cancelAll();
   }

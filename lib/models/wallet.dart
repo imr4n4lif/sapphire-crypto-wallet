@@ -1,4 +1,4 @@
-import 'package:crypto_wallet/core/constants/app_constants.dart';
+import '../core/constants/app_constants.dart';
 
 class WalletData {
   final String mnemonic;

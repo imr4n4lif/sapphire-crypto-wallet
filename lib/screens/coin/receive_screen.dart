@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/wallet_provider.dart';
 import '../../core/constants/app_constants.dart';
-import '../../core/services/wallet_service.dart';
 
 class ReceiveScreen extends StatelessWidget {
   final CoinType coinType;
@@ -37,7 +36,7 @@ class ReceiveScreen extends StatelessWidget {
             return const Center(child: Text('No wallet found'));
           }
 
-          final address = WalletService().getAddress(
+          final address = WalletHelper.getAddress(
             walletProvider.wallet!,
             coinType,
           );

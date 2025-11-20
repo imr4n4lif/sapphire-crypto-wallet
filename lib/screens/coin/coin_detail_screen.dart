@@ -43,15 +43,22 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
   }
 
   Future<void> _loadPriceHistory() async {
+    if (_loadingHistory) return;
+
     setState(() => _loadingHistory = true);
 
     try {
       final days = _getTimelineDays(_selectedTimeline);
       final history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
 
-      if (mounted) {
+      if (mounted && history.isNotEmpty) {
         setState(() {
           _priceHistory = history;
+          _loadingHistory = false;
+        });
+      } else {
+        setState(() {
+          _priceHistory = [];
           _loadingHistory = false;
         });
       }
@@ -168,77 +175,87 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
     final change24h = balance?.change24h ?? 0.0;
     final isPositive = change24h >= 0;
 
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Theme.of(context).colorScheme.primary,
-            Theme.of(context).colorScheme.secondary,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          CoinIcon(coinType: widget.coinType, size: 48),
-          const SizedBox(height: 16),
-          Text(
-            '${balanceValue.toStringAsFixed(8)} ${_coinInfo.symbol}',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            formatter.format(usdValue),
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: isPositive
-                  ? Colors.green.withOpacity(0.2)
-                  : Colors.red.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isPositive ? Icons.arrow_upward : Icons.arrow_downward,
-                  size: 16,
-                  color: Colors.white,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '${change24h.abs().toStringAsFixed(2)}% (24h)',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Theme.of(context).colorScheme.primary,
+                Theme.of(context).colorScheme.secondary,
               ],
             ),
+            borderRadius: BorderRadius.circular(20),
           ),
-          const SizedBox(height: 16),
-          Text(
-            '${formatter.format(pricePerCoin)} per ${_coinInfo.symbol}',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.8),
-              fontSize: 14,
-            ),
+          child: Column(
+            children: [
+              CoinIcon(coinType: widget.coinType, size: 48),
+              const SizedBox(height: 16),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${balanceValue.toStringAsFixed(8)} ${_coinInfo.symbol}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                formatter.format(usdValue),
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isPositive
+                      ? Colors.green.withOpacity(0.2)
+                      : Colors.red.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isPositive ? Icons.arrow_upward : Icons.arrow_downward,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${change24h.abs().toStringAsFixed(2)}% (24h)',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${formatter.format(pricePerCoin)} per ${_coinInfo.symbol}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -265,7 +282,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
                       label: Text(_getTimelineLabel(option)),
                       selected: isSelected,
                       onSelected: (selected) {
-                        if (selected) {
+                        if (selected && !_loadingHistory) {
                           setState(() => _selectedTimeline = option);
                           _loadPriceHistory();
                         }
@@ -291,60 +308,11 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
                       color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'No price data available',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
+                    const Text('No price data available'),
                   ],
                 ),
               )
-                  : LineChart(
-                LineChartData(
-                  gridData: FlGridData(show: false),
-                  titlesData: FlTitlesData(
-                    leftTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        reservedSize: 60,
-                        getTitlesWidget: (value, meta) {
-                          return Text(
-                            '\$${value.toStringAsFixed(0)}',
-                            style: const TextStyle(fontSize: 10),
-                          );
-                        },
-                      ),
-                    ),
-                    rightTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    topTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                  ),
-                  borderData: FlBorderData(show: false),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: _priceHistory.asMap().entries.map((entry) {
-                        return FlSpot(
-                          entry.key.toDouble(),
-                          entry.value.price,
-                        );
-                      }).toList(),
-                      isCurved: true,
-                      color: Theme.of(context).colorScheme.primary,
-                      barWidth: 2,
-                      dotData: FlDotData(show: false),
-                      belowBarData: BarAreaData(
-                        show: true,
-                        color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+                  : _buildChart(),
             ),
           ],
         ),
@@ -352,49 +320,164 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
     );
   }
 
-  Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SendScreen(coinType: widget.coinType),
-                ),
-              );
-            },
-            icon: const Icon(Icons.arrow_upward),
-            label: const Text('Send'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+  Widget _buildChart() {
+    if (_priceHistory.isEmpty) return const SizedBox();
+
+    final minPrice = _priceHistory.map((p) => p.price).reduce((a, b) => a < b ? a : b);
+    final maxPrice = _priceHistory.map((p) => p.price).reduce((a, b) => a > b ? a : b);
+    final priceRange = maxPrice - minPrice;
+    final buffer = priceRange * 0.1;
+
+    return LineChart(
+      LineChartData(
+        minY: minPrice - buffer,
+        maxY: maxPrice + buffer,
+        gridData: FlGridData(
+          show: true,
+          drawVerticalLine: false,
+          horizontalInterval: (maxPrice - minPrice) / 4,
+          getDrawingHorizontalLine: (value) {
+            return FlLine(
+              color: Colors.grey.withOpacity(0.2),
+              strokeWidth: 1,
+            );
+          },
+        ),
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 50,
+              interval: (maxPrice - minPrice) / 4,
+              getTitlesWidget: (value, meta) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Text(
+                    '\$${value.toStringAsFixed(0)}',
+                    style: const TextStyle(fontSize: 10),
+                    textAlign: TextAlign.right,
+                  ),
+                );
+              },
+            ),
+          ),
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              interval: (_priceHistory.length / 4).ceilToDouble(),
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index < 0 || index >= _priceHistory.length) {
+                  return const SizedBox();
+                }
+
+                final date = _priceHistory[index].timestamp;
+                String label;
+
+                if (_selectedTimeline == TimelineOption.day) {
+                  label = DateFormat('HH:mm').format(date);
+                } else {
+                  label = DateFormat('MM/dd').format(date);
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    label,
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                );
+              },
             ),
           ),
         ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReceiveScreen(coinType: widget.coinType),
-                ),
-              );
+        borderData: FlBorderData(show: false),
+        lineBarsData: [
+          LineChartBarData(
+            spots: _priceHistory.asMap().entries.map((entry) {
+              return FlSpot(entry.key.toDouble(), entry.value.price);
+            }).toList(),
+            isCurved: true,
+            color: Theme.of(context).colorScheme.primary,
+            barWidth: 2,
+            dotData: FlDotData(show: false),
+            belowBarData: BarAreaData(
+              show: true,
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+            ),
+          ),
+        ],
+        lineTouchData: LineTouchData(
+          touchTooltipData: LineTouchTooltipData(
+            tooltipBgColor: Theme.of(context).colorScheme.surface,
+            getTooltipItems: (touchedSpots) {
+              return touchedSpots.map((spot) {
+                final date = _priceHistory[spot.x.toInt()].timestamp;
+                return LineTooltipItem(
+                  '\$${spot.y.toStringAsFixed(2)}\n${DateFormat('MMM dd, HH:mm').format(date)}',
+                  TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface,
+                    fontSize: 12,
+                  ),
+                );
+              }).toList();
             },
-            icon: const Icon(Icons.arrow_downward),
-            label: const Text('Receive'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              side: BorderSide(
-                color: Theme.of(context).colorScheme.primary,
-                width: 2,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SendScreen(coinType: widget.coinType),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.arrow_upward),
+                label: const Text('Send'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
               ),
             ),
-          ),
-        ),
-      ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ReceiveScreen(coinType: widget.coinType),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.arrow_downward),
+                label: const Text('Receive'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 2,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -442,6 +525,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
                     Text(
                       dateFormat.format(tx.timestamp),
                       style: Theme.of(context).textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     Text(
                       '${tx.confirmations} confirmations',
@@ -455,10 +539,13 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    '${tx.isIncoming ? '+' : '-'}${tx.amount.toStringAsFixed(8)}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: tx.isIncoming ? Colors.green : Colors.red,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '${tx.isIncoming ? '+' : '-'}${tx.amount.toStringAsFixed(6)}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: tx.isIncoming ? Colors.green : Colors.red,
+                      ),
                     ),
                   ),
                   Text(

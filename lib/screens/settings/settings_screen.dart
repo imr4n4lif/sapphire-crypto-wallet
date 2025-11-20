@@ -713,7 +713,8 @@ class ViewPrivateKeysScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               ...CoinInfo.allCoins.map((coin) {
-                final privateKey = WalletService().getPrivateKey(walletProvider.wallet!, coin.type);
+                // CHANGE THIS LINE - Use WalletHelper instead of WalletService
+                final privateKey = WalletHelper.getPrivateKey(walletProvider.wallet!, coin.type);
                 return _PrivateKeyCard(coin: coin, privateKey: privateKey);
               }),
             ],

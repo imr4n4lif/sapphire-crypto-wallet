@@ -7,7 +7,6 @@ import 'package:pointycastle/digests/ripemd160.dart';
 import 'package:pointycastle/digests/sha256.dart';
 import 'package:bs58check/bs58check.dart' as bs58;
 import 'package:crypto/crypto.dart';
-import 'dart:convert';
 import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
 
@@ -16,17 +15,14 @@ class WalletService {
   factory WalletService() => _instance;
   WalletService._internal();
 
-  // Generate new 12-word mnemonic
   String generateMnemonic() {
     return bip39.generateMnemonic();
   }
 
-  // Validate mnemonic
   bool validateMnemonic(String mnemonic) {
     return bip39.validateMnemonic(mnemonic);
   }
 
-  // Create wallet from mnemonic
   Future<WalletData> createWalletFromMnemonic(String mnemonic, bool isMainnet) async {
     if (!validateMnemonic(mnemonic)) {
       throw Exception('Invalid mnemonic phrase');
@@ -34,7 +30,6 @@ class WalletService {
 
     print('🔐 Creating wallet from mnemonic...');
 
-    // Generate seed from mnemonic
     final seed = bip39.mnemonicToSeed(mnemonic);
     final root = bip32.BIP32.fromSeed(seed);
 
@@ -53,7 +48,7 @@ class WalletService {
     final btcAddress = _generateBitcoinAddress(btcNode.publicKey, isMainnet);
     print('✅ BTC Address: $btcAddress');
 
-    // Generate Filecoin wallet (secp256k1 address) - IMPROVED
+    // Generate Filecoin wallet
     final filPath = AppConstants.filPath;
     final filNode = root.derivePath(filPath);
     final filPrivateKey = HEX.encode(filNode.privateKey!);
@@ -71,56 +66,37 @@ class WalletService {
     );
   }
 
-  // Generate Bitcoin address from public key
   String _generateBitcoinAddress(Uint8List publicKey, bool isMainnet) {
-    // SHA-256 hash
     final sha256Hash = SHA256Digest().process(publicKey);
-
-    // RIPEMD-160 hash
     final ripemd160Hash = RIPEMD160Digest().process(sha256Hash);
-
-    // Add version byte (0x00 for mainnet, 0x6F for testnet)
     final version = isMainnet ? 0x00 : 0x6F;
     final versionedPayload = Uint8List.fromList([version, ...ripemd160Hash]);
-
-    // Encode with Base58Check
     return bs58.encode(versionedPayload);
   }
 
-  // IMPROVED: Generate Filecoin address with proper formatting
   String _generateFilecoinAddressImproved(Uint8List publicKey, bool isMainnet) {
     try {
       print('🔧 Generating Filecoin address (improved)...');
       print('Public Key Length: ${publicKey.length}');
-      print('Public Key (hex): ${HEX.encode(publicKey)}');
 
-      // Use Blake2b-160 hash (fallback to SHA256 for now)
       final hash = sha256.convert(publicKey).bytes;
       final payload = Uint8List.fromList(hash.sublist(0, 20));
 
       print('Payload Hash (20 bytes): ${HEX.encode(payload)}');
 
-      // Protocol 1 for secp256k1
       final protocol = 1;
-
-      // Create the address payload: protocol (1 byte) + payload (20 bytes)
       final addressPayload = Uint8List.fromList([protocol, ...payload]);
 
-      // Calculate checksum (Blake2b-32, using SHA256 as fallback)
       final checksumHash = sha256.convert(addressPayload).bytes;
       final checksum = Uint8List.fromList(checksumHash.sublist(0, 4));
 
       print('Checksum (4 bytes): ${HEX.encode(checksum)}');
 
-      // Combine: payload + checksum
       final combined = Uint8List.fromList([...addressPayload, ...checksum]);
-
-      // Encode with Base32 (lowercase, no padding)
       final base32Encoded = _base32EncodeNoPadding(combined);
 
       print('Base32 encoded: $base32Encoded');
 
-      // Add network prefix
       final prefix = isMainnet ? 'f' : 't';
       final address = '$prefix$protocol$base32Encoded';
 
@@ -128,13 +104,11 @@ class WalletService {
       return address;
     } catch (e) {
       print('❌ Error generating Filecoin address: $e');
-      // Return a placeholder address format that won't crash the app
       final prefix = isMainnet ? 'f' : 't';
       return '${prefix}1unavailable';
     }
   }
 
-  // Base32 encoding WITHOUT padding (Filecoin standard)
   String _base32EncodeNoPadding(Uint8List data) {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
     final result = StringBuffer();
@@ -159,27 +133,4 @@ class WalletService {
     return result.toString();
   }
 
-  // Get private key for specific coin
-  String getPrivateKey(WalletData wallet, CoinType coinType) {
-    switch (coinType) {
-      case CoinType.btc:
-        return wallet.btcPrivateKey;
-      case CoinType.eth:
-        return wallet.ethPrivateKey;
-      case CoinType.fil:
-        return wallet.filPrivateKey;
-    }
-  }
-
-  // Get address for specific coin
-  String getAddress(WalletData wallet, CoinType coinType) {
-    switch (coinType) {
-      case CoinType.btc:
-        return wallet.btcAddress;
-      case CoinType.eth:
-        return wallet.ethAddress;
-      case CoinType.fil:
-        return wallet.filAddress;
-    }
-  }
 }

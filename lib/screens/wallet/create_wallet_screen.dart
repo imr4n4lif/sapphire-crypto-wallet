@@ -15,7 +15,6 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
   String? _mnemonic;
   bool _isCreating = false;
   bool _hasAcknowledged = false;
-  bool _showNameInput = true;
   final _nameController = TextEditingController(text: 'Main Wallet');
 
   @override
@@ -43,7 +42,6 @@ class _CreateWalletScreenState extends State<CreateWalletScreen> {
       setState(() {
         _mnemonic = mnemonic;
         _isCreating = false;
-        _showNameInput = false;
       });
     } catch (e) {
       setState(() => _isCreating = false);
