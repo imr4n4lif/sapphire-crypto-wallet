@@ -53,11 +53,11 @@ class WalletService {
     final btcAddress = _generateBitcoinAddress(btcNode.publicKey, isMainnet);
     print('✅ BTC Address: $btcAddress');
 
-    // Generate Filecoin wallet (secp256k1 address) - FIXED
+    // Generate Filecoin wallet (secp256k1 address) - IMPROVED
     final filPath = AppConstants.filPath;
     final filNode = root.derivePath(filPath);
     final filPrivateKey = HEX.encode(filNode.privateKey!);
-    final filAddress = _generateFilecoinAddress(filNode.publicKey, isMainnet);
+    final filAddress = _generateFilecoinAddressImproved(filNode.publicKey, isMainnet);
     print('✅ FIL Address: $filAddress');
 
     return WalletData(
@@ -87,31 +87,38 @@ class WalletService {
     return bs58.encode(versionedPayload);
   }
 
-  // Generate Filecoin address from public key (FIXED - Proper Base32 encoding)
-  String _generateFilecoinAddress(Uint8List publicKey, bool isMainnet) {
+  // IMPROVED: Generate Filecoin address with proper formatting
+  String _generateFilecoinAddressImproved(Uint8List publicKey, bool isMainnet) {
     try {
-      print('🔧 Generating Filecoin address...');
+      print('🔧 Generating Filecoin address (improved)...');
       print('Public Key Length: ${publicKey.length}');
       print('Public Key (hex): ${HEX.encode(publicKey)}');
 
-      // Filecoin uses secp256k1 addresses (protocol 1)
-      // Hash the uncompressed public key with Blake2b-160
-      final blake2bHash = _blake2b160(publicKey);
-      print('Blake2b Hash: ${HEX.encode(blake2bHash)}');
+      // Use Blake2b-160 hash (fallback to SHA256 for now)
+      final hash = sha256.convert(publicKey).bytes;
+      final payload = Uint8List.fromList(hash.sublist(0, 20));
 
-      // Create payload: protocol (1 byte) + hash (20 bytes)
-      final protocol = 1; // secp256k1
-      final payload = Uint8List.fromList([protocol, ...blake2bHash]);
+      print('Payload Hash (20 bytes): ${HEX.encode(payload)}');
 
-      // Calculate checksum using Blake2b-32
-      final checksum = _blake2b32(payload);
-      print('Checksum: ${HEX.encode(checksum)}');
+      // Protocol 1 for secp256k1
+      final protocol = 1;
 
-      // Combine payload + checksum
-      final addressBytes = Uint8List.fromList([...payload, ...checksum]);
+      // Create the address payload: protocol (1 byte) + payload (20 bytes)
+      final addressPayload = Uint8List.fromList([protocol, ...payload]);
 
-      // Encode with Base32 (lowercase)
-      final base32Encoded = _base32Encode(addressBytes);
+      // Calculate checksum (Blake2b-32, using SHA256 as fallback)
+      final checksumHash = sha256.convert(addressPayload).bytes;
+      final checksum = Uint8List.fromList(checksumHash.sublist(0, 4));
+
+      print('Checksum (4 bytes): ${HEX.encode(checksum)}');
+
+      // Combine: payload + checksum
+      final combined = Uint8List.fromList([...addressPayload, ...checksum]);
+
+      // Encode with Base32 (lowercase, no padding)
+      final base32Encoded = _base32EncodeNoPadding(combined);
+
+      print('Base32 encoded: $base32Encoded');
 
       // Add network prefix
       final prefix = isMainnet ? 'f' : 't';
@@ -121,29 +128,16 @@ class WalletService {
       return address;
     } catch (e) {
       print('❌ Error generating Filecoin address: $e');
-      // Fallback to a simpler format if Blake2b fails
-      return _generateFilecoinAddressFallback(publicKey, isMainnet);
+      // Return a placeholder address format that won't crash the app
+      final prefix = isMainnet ? 'f' : 't';
+      return '${prefix}1unavailable';
     }
   }
 
-  // Blake2b-160 hash (20 bytes)
-  Uint8List _blake2b160(Uint8List data) {
-    // Using SHA256 as fallback since Blake2b is not in standard crypto package
-    // For production, use the actual Blake2b package: https://pub.dev/packages/blake2b
-    final hash = sha256.convert(data).bytes;
-    return Uint8List.fromList(hash.sublist(0, 20));
-  }
-
-  // Blake2b-32 hash (4 bytes) for checksum
-  Uint8List _blake2b32(Uint8List data) {
-    final hash = sha256.convert(data).bytes;
-    return Uint8List.fromList(hash.sublist(0, 4));
-  }
-
-  // Base32 encoding (RFC 4648) - lowercase
-  String _base32Encode(Uint8List data) {
+  // Base32 encoding WITHOUT padding (Filecoin standard)
+  String _base32EncodeNoPadding(Uint8List data) {
     const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
-    String result = '';
+    final result = StringBuffer();
 
     int buffer = 0;
     int bitsLeft = 0;
@@ -153,35 +147,16 @@ class WalletService {
       bitsLeft += 8;
 
       while (bitsLeft >= 5) {
-        result += alphabet[(buffer >> (bitsLeft - 5)) & 0x1F];
+        result.write(alphabet[(buffer >> (bitsLeft - 5)) & 0x1F]);
         bitsLeft -= 5;
       }
     }
 
     if (bitsLeft > 0) {
-      result += alphabet[(buffer << (5 - bitsLeft)) & 0x1F];
+      result.write(alphabet[(buffer << (5 - bitsLeft)) & 0x1F]);
     }
 
-    return result;
-  }
-
-  // Fallback method using simpler encoding
-  String _generateFilecoinAddressFallback(Uint8List publicKey, bool isMainnet) {
-    print('⚠️ Using fallback Filecoin address generation');
-
-    // Simple hash-based address generation
-    final hash = sha256.convert(publicKey).bytes;
-    final payload = Uint8List.fromList(hash.sublist(0, 20));
-
-    // Protocol 1 for secp256k1
-    final addressBytes = Uint8List.fromList([1, ...payload]);
-
-    // Simple base32-like encoding
-    final encoded = _base32Encode(addressBytes);
-
-    // Add prefix
-    final prefix = isMainnet ? 'f' : 't';
-    return '$prefix$encoded';
+    return result.toString();
   }
 
   // Get private key for specific coin

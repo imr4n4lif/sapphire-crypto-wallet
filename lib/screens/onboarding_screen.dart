@@ -10,99 +10,101 @@ class OnboardingScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            children: [
-              const Spacer(),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              children: [
+                const SizedBox(height: 40),
 
-              // ---- SVG LOGO (Color from Theme) ----
-              SvgPicture.asset(
-                "assets/icons/logo.svg",
-                width: 110,
-                height: 110,
-                colorFilter: ColorFilter.mode(
-                  Theme.of(context).colorScheme.primary,
-                  BlendMode.srcIn,
-                ),
-              ),
-
-              const SizedBox(height: 30),
-
-              Text(
-                'Welcome to Sapphire Wallet',
-                style: Theme.of(context).textTheme.displaySmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Secure, decentralized wallet for Bitcoin, Ethereum, and Filecoin',
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: TextAlign.center,
-              ),
-
-              const Spacer(),
-
-              const _FeatureCard(
-                icon: Icons.shield_outlined,
-                title: 'Fully Secure',
-                subtitle: 'Your keys, your crypto',
-              ),
-              const SizedBox(height: 16),
-              const _FeatureCard(
-                icon: Icons.lock_outline,
-                title: 'Non-Custodial',
-                subtitle: 'Complete control of your assets',
-              ),
-              const SizedBox(height: 16),
-              const _FeatureCard(
-                icon: Icons.language,
-                title: 'Multi-Chain',
-                subtitle: 'Support for BTC, ETH, and FIL',
-              ),
-
-              const Spacer(),
-
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CreateWalletScreen(),
-                      ),
-                    );
-                  },
-                  child: const Text('Create New Wallet'),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ImportWalletScreen(),
-                      ),
-                    );
-                  },
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    side: BorderSide(
-                      color: Theme.of(context).colorScheme.primary,
-                      width: 2,
-                    ),
+                // ---- SVG LOGO (Color from Theme) ----
+                SvgPicture.asset(
+                  "assets/icons/logo.svg",
+                  width: 110,
+                  height: 110,
+                  colorFilter: ColorFilter.mode(
+                    Theme.of(context).colorScheme.primary,
+                    BlendMode.srcIn,
                   ),
-                  child: const Text('Import Existing Wallet'),
                 ),
-              ),
 
-              const SizedBox(height: 30),
-            ],
+                const SizedBox(height: 30),
+
+                Text(
+                  'Welcome to Sapphire Wallet',
+                  style: Theme.of(context).textTheme.displaySmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Secure, decentralized wallet for Bitcoin, Ethereum, and Filecoin',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 40),
+
+                const _FeatureCard(
+                  icon: Icons.shield_outlined,
+                  title: 'Fully Secure',
+                  subtitle: 'Your keys, your crypto',
+                ),
+                const SizedBox(height: 16),
+                const _FeatureCard(
+                  icon: Icons.lock_outline,
+                  title: 'Non-Custodial',
+                  subtitle: 'Complete control of your assets',
+                ),
+                const SizedBox(height: 16),
+                const _FeatureCard(
+                  icon: Icons.language,
+                  title: 'Multi-Chain',
+                  subtitle: 'Support for BTC, ETH, and FIL',
+                ),
+
+                const SizedBox(height: 40),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const CreateWalletScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text('Create New Wallet'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ImportWalletScreen(),
+                        ),
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    child: const Text('Import Existing Wallet'),
+                  ),
+                ),
+
+                const SizedBox(height: 30),
+              ],
+            ),
           ),
         ),
       ),

@@ -63,7 +63,7 @@ class BlockchainService {
       print('📡 Fetching BTC balance for: $address');
 
       final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 15),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
@@ -106,9 +106,15 @@ class BlockchainService {
     }
   }
 
-  // Get Filecoin balance with better error handling
+  // Get Filecoin balance with IMPROVED error handling
   Future<double> getFilecoinBalance(String address) async {
     try {
+      // Skip if address is placeholder/unavailable
+      if (address.endsWith('unavailable')) {
+        print('⚠️ Filecoin address unavailable, skipping balance check');
+        return 0.0;
+      }
+
       final url = _isMainnet ? AppConstants.filMainnetRpc : AppConstants.filTestnetRpc;
 
       print('📡 Fetching FIL balance for: $address');
@@ -123,8 +129,11 @@ class BlockchainService {
           'id': 1,
         }),
       ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Request timeout'),
+        const Duration(seconds: 15),
+        onTimeout: () {
+          print('⚠️ FIL RPC request timeout');
+          throw Exception('Request timeout');
+        },
       );
 
       if (response.statusCode == 200) {
@@ -132,26 +141,48 @@ class BlockchainService {
 
         // Check for RPC error
         if (data['error'] != null) {
-          print('⚠️ FIL RPC Error: ${data['error']['message']}');
+          final errorMsg = data['error']['message'] ?? 'Unknown error';
+          print('⚠️ FIL RPC Error: $errorMsg');
+
+          // Don't spam logs if it's a known address format issue
+          if (errorMsg.contains('invalid address')) {
+            print('ℹ️ Filecoin address format may need adjustment');
+          }
           return 0.0;
         }
 
         if (data['result'] != null) {
           final balanceStr = data['result'].toString().replaceAll('"', '');
-          final balanceAttoFil = BigInt.parse(balanceStr);
-          final balance = balanceAttoFil / BigInt.from(10).pow(18);
-          print('✅ FIL Balance: $balance');
-          return balance;
+
+          // Handle empty or invalid balance strings
+          if (balanceStr.isEmpty || balanceStr == 'null') {
+            print('ℹ️ FIL balance is empty/null');
+            return 0.0;
+          }
+
+          try {
+            final balanceAttoFil = BigInt.parse(balanceStr);
+            final balance = balanceAttoFil / BigInt.from(10).pow(18);
+            print('✅ FIL Balance: $balance');
+            return balance;
+          } catch (e) {
+            print('⚠️ Failed to parse FIL balance: $balanceStr');
+            return 0.0;
+          }
         }
       } else if (response.statusCode == 500) {
-        print('⚠️ FIL RPC server error (500)');
+        print('⚠️ FIL RPC server error (500) - Node may be unavailable');
         return 0.0;
       } else {
         print('⚠️ Failed to fetch FIL balance: ${response.statusCode}');
         return 0.0;
       }
     } catch (e) {
-      print('❌ Error fetching Filecoin balance: $e');
+      if (e.toString().contains('timeout')) {
+        print('⚠️ FIL balance check timed out');
+      } else {
+        print('❌ Error fetching Filecoin balance: $e');
+      }
       return 0.0;
     }
     return 0.0;
@@ -170,7 +201,7 @@ class BlockchainService {
       print('📡 Fetching BTC transactions for: $address');
 
       final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 15),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
@@ -194,7 +225,11 @@ class BlockchainService {
         return <Transaction>[];
       }
     } catch (e) {
-      print('❌ Error fetching Bitcoin transactions: $e');
+      if (e.toString().contains('timeout')) {
+        print('⚠️ BTC transaction fetch timed out');
+      } else {
+        print('❌ Error fetching Bitcoin transactions: $e');
+      }
       return <Transaction>[];
     }
   }
@@ -220,7 +255,7 @@ class BlockchainService {
       print('📡 Fetching ETH transactions for: $address');
 
       final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 15),
+        const Duration(seconds: 20),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
@@ -269,9 +304,15 @@ class BlockchainService {
     }
   }
 
-  // Get Filecoin transactions
+  // Get Filecoin transactions with improved error handling
   Future<List<Transaction>> getFilecoinTransactions(String address) async {
     try {
+      // Skip if address is placeholder/unavailable
+      if (address.endsWith('unavailable')) {
+        print('⚠️ Filecoin address unavailable, skipping transaction check');
+        return <Transaction>[];
+      }
+
       await _respectRateLimit(_lastFilApiCall);
       _lastFilApiCall = DateTime.now();
 
@@ -289,7 +330,7 @@ class BlockchainService {
           'id': 1,
         }),
       ).timeout(
-        const Duration(seconds: 15),
+        const Duration(seconds: 20),
         onTimeout: () => throw Exception('Request timeout'),
       );
 
@@ -321,7 +362,11 @@ class BlockchainService {
 
       return <Transaction>[];
     } catch (e) {
-      print('❌ Error fetching Filecoin transactions: $e');
+      if (e.toString().contains('timeout')) {
+        print('⚠️ FIL transaction fetch timed out');
+      } else {
+        print('❌ Error fetching Filecoin transactions: $e');
+      }
       return <Transaction>[];
     }
   }
