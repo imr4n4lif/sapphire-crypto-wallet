@@ -81,6 +81,9 @@ class BiometricService {
 
       // Handle specific error codes
       switch (e.code) {
+        case 'no_fragment_activity':
+          print('ℹ️ FragmentActivity not available - MainActivity needs to extend FlutterFragmentActivity');
+          return false;
         case 'NotAvailable':
         case 'NotEnrolled':
         case 'PasscodeNotSet':

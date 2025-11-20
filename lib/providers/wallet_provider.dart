@@ -81,8 +81,9 @@ class WalletProvider with ChangeNotifier {
         }
 
         await _loadCurrentWallet();
-        await refreshBalances();
-        await refreshTransactions();
+
+        // Load data in background to avoid blocking UI
+        _loadDataInBackground();
 
         _startAutoRefresh();
       }
@@ -92,6 +93,20 @@ class WalletProvider with ChangeNotifier {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  // Load balances and transactions in background without blocking
+  Future<void> _loadDataInBackground() async {
+    // Use microtask to avoid blocking main thread
+    Future.microtask(() async {
+      try {
+        await refreshBalances();
+        await Future.delayed(const Duration(milliseconds: 100));
+        await refreshTransactions();
+      } catch (e) {
+        print('❌ Error loading background data: $e');
+      }
+    });
   }
 
   Future<void> _loadAllWallets() async {
@@ -234,8 +249,9 @@ class WalletProvider with ChangeNotifier {
     await _storage.saveString('current_wallet_id', walletId);
 
     await _loadCurrentWallet();
-    await refreshBalances();
-    await refreshTransactions();
+
+    // Load data in background
+    _loadDataInBackground();
 
     notifyListeners();
   }
@@ -301,7 +317,8 @@ class WalletProvider with ChangeNotifier {
       await _storage.saveString('current_wallet_id', walletId);
       await _saveAllWallets();
 
-      await refreshBalances();
+      // Load data in background
+      _loadDataInBackground();
 
       _startAutoRefresh();
 
@@ -345,8 +362,8 @@ class WalletProvider with ChangeNotifier {
       await _storage.saveString('current_wallet_id', walletId);
       await _saveAllWallets();
 
-      await refreshBalances();
-      await refreshTransactions();
+      // Load data in background
+      _loadDataInBackground();
 
       _startAutoRefresh();
 
@@ -410,12 +427,12 @@ class WalletProvider with ChangeNotifier {
       // Fetch prices first (parallel)
       final prices = await _priceService.fetchAllPrices();
 
-      // Fetch balances (with delays)
+      // Fetch balances with staggered delays to respect rate limits
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 800));
 
       final ethBalance = await _blockchainService.getEthereumBalance(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 800));
 
       final filBalance = await _blockchainService.getFilecoinBalance(_wallet!.filAddress);
 
@@ -461,10 +478,10 @@ class WalletProvider with ChangeNotifier {
 
     try {
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 1000));
 
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 1000));
 
       final filTxs = await _blockchainService.getFilecoinTransactions(_wallet!.filAddress);
 
