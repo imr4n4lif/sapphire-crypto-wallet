@@ -27,13 +27,19 @@ class CoinIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // FIXED: Don't apply color filter for Tron to keep original colors
+    // Only apply color filter if explicitly provided AND not Tron
+    final shouldApplyColor = color != null && coinType != CoinType.trx;
+
     return SvgPicture.asset(
       _getSvgPath(),
       width: size,
       height: size,
-      colorFilter: color != null
+      colorFilter: shouldApplyColor
           ? ColorFilter.mode(color!, BlendMode.srcIn)
           : null,
+      // Allow original colors to show through
+      fit: BoxFit.contain,
     );
   }
 }
