@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _WalletMenuSheet(),
+      builder: (bottomSheetContext) => _WalletMenuSheet(parentContext: context),
     );
   }
 
@@ -629,7 +629,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 }
 
 // FIXED Wallet Menu Bottom Sheet with proper context handling
-class _WalletMenuSheet extends StatelessWidget {
+class _WalletMenuSheet extends StatefulWidget {
+  final BuildContext parentContext;
+
+  const _WalletMenuSheet({required this.parentContext});
+
+  @override
+  State<_WalletMenuSheet> createState() => _WalletMenuSheetState();
+}
+
+class _WalletMenuSheetState extends State<_WalletMenuSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -760,8 +769,7 @@ class _WalletMenuSheet extends StatelessWidget {
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           onPressed: () {
-                            Navigator.pop(context);
-                            _showCreateWalletDialog(context);
+                            _showCreateWalletDialog();
                           },
                           icon: const Icon(Icons.add),
                           label: const Text('Create New Wallet'),
@@ -772,8 +780,7 @@ class _WalletMenuSheet extends StatelessWidget {
                         width: double.infinity,
                         child: OutlinedButton.icon(
                           onPressed: () {
-                            Navigator.pop(context);
-                            _showImportWalletDialog(context);
+                            _showImportWalletDialog();
                           },
                           icon: const Icon(Icons.download_outlined),
                           label: const Text('Import Wallet'),
@@ -796,8 +803,8 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
-  // FIXED: Create wallet with proper context handling and mounted checks
-  void _showCreateWalletDialog(BuildContext context) {
+  // FIXED: Create wallet with proper context handling
+  void _showCreateWalletDialog() {
     final controller = TextEditingController(
         text: 'Wallet ${context.read<WalletProvider>().allWallets.length + 1}'
     );
@@ -824,14 +831,24 @@ class _WalletMenuSheet extends StatelessWidget {
             onPressed: () {
               final name = controller.text.trim();
               if (name.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                ScaffoldMessenger.of(widget.parentContext).showSnackBar(
                   const SnackBar(content: Text('Please enter a wallet name')),
                 );
                 return;
               }
 
+              // Pop the input dialog
               Navigator.pop(dialogContext);
-              _createWalletWithProgress(context, name);
+
+              // Close the bottom sheet using the state's context
+              Navigator.of(context).pop();
+
+              // Use Future.microtask to ensure dialogs are fully closed
+              Future.microtask(() {
+                if (widget.parentContext.mounted) {
+                  _createWalletWithProgress(name);
+                }
+              });
             },
             child: const Text('Create'),
           ),
@@ -840,14 +857,13 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
-  void _createWalletWithProgress(BuildContext context, String name) async {
-    // Store references before async operations
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
+  void _createWalletWithProgress(String name) async {
+    // Ensure we have a valid context
+    if (!mounted) return;
 
-    // Show progress
+    // Show progress dialog using parent context
     showDialog(
-      context: context,
+      context: widget.parentContext,
       barrierDismissible: false,
       builder: (progressContext) => WillPopScope(
         onWillPop: () async => false,
@@ -865,32 +881,39 @@ class _WalletMenuSheet extends StatelessWidget {
     );
 
     try {
-      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final walletProvider = Provider.of<WalletProvider>(widget.parentContext, listen: false);
       final mnemonic = await walletProvider.createNewWallet(name);
 
-      // Close progress dialog
-      navigator.pop();
+      // Close progress dialog if parent still mounted
+      if (widget.parentContext.mounted) {
+        Navigator.of(widget.parentContext).pop();
+      }
 
       await Future.delayed(const Duration(milliseconds: 200));
 
-      // Show seed phrase in a new screen instead of dialog
-      navigator.push(
-        MaterialPageRoute(
-          builder: (_) => _SeedPhraseScreen(mnemonic: mnemonic),
-        ),
-      );
+      // Show seed phrase in a new screen
+      if (widget.parentContext.mounted) {
+        Navigator.of(widget.parentContext).push(
+          MaterialPageRoute(
+            builder: (_) => _SeedPhraseScreen(mnemonic: mnemonic),
+          ),
+        );
+      }
     } catch (e) {
-      navigator.pop(); // Close progress
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Close progress dialog if parent still mounted
+      if (widget.parentContext.mounted) {
+        Navigator.of(widget.parentContext).pop();
+        ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  void _showImportWalletDialog(BuildContext context) {
+  void _showImportWalletDialog() {
     final nameController = TextEditingController(
         text: 'Imported Wallet ${context.read<WalletProvider>().allWallets.length + 1}'
     );
@@ -933,14 +956,24 @@ class _WalletMenuSheet extends StatelessWidget {
               final mnemonic = mnemonicController.text.trim();
 
               if (name.isEmpty || mnemonic.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                ScaffoldMessenger.of(widget.parentContext).showSnackBar(
                   const SnackBar(content: Text('Please fill all fields')),
                 );
                 return;
               }
 
+              // Pop the input dialog
               Navigator.pop(dialogContext);
-              _importWalletWithProgress(context, name, mnemonic);
+
+              // Close the bottom sheet using the state's context
+              Navigator.of(context).pop();
+
+              // Use Future.microtask to ensure dialogs are fully closed
+              Future.microtask(() {
+                if (widget.parentContext.mounted) {
+                  _importWalletWithProgress(name, mnemonic);
+                }
+              });
             },
             child: const Text('Import'),
           ),
@@ -949,12 +982,12 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
-  void _importWalletWithProgress(BuildContext context, String name, String mnemonic) async {
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
+  void _importWalletWithProgress(String name, String mnemonic) async {
+    // Ensure we have a valid context
+    if (!mounted) return;
 
     showDialog(
-      context: context,
+      context: widget.parentContext,
       barrierDismissible: false,
       builder: (progressContext) => WillPopScope(
         onWillPop: () async => false,
@@ -972,122 +1005,31 @@ class _WalletMenuSheet extends StatelessWidget {
     );
 
     try {
-      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final walletProvider = Provider.of<WalletProvider>(widget.parentContext, listen: false);
       await walletProvider.importExistingWallet(name, mnemonic);
 
-      navigator.pop(); // Close progress
-      scaffoldMessenger.showSnackBar(
-        const SnackBar(
-          content: Text('✅ Wallet imported successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      // Close progress if parent mounted
+      if (widget.parentContext.mounted) {
+        Navigator.of(widget.parentContext).pop();
+        ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Wallet imported successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } catch (e) {
-      navigator.pop(); // Close progress
-      scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      // Close progress if parent mounted
+      if (widget.parentContext.mounted) {
+        Navigator.of(widget.parentContext).pop();
+        ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
-  }
-
-  void _showSeedPhraseDialog(BuildContext context, String mnemonic) {
-    if (!context.mounted) return;
-
-    final words = mnemonic.split(' ');
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('⚠️ Save Your Seed Phrase'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red),
-                ),
-                child: const Text(
-                  'Write down these 12 words and store them safely.',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 16),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 3,
-                  crossAxisSpacing: 8,
-                  mainAxisSpacing: 8,
-                ),
-                itemCount: words.length,
-                itemBuilder: (context, index) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          '${index + 1}.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            words[index],
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(text: mnemonic));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Seed phrase copied')),
-                    );
-                  },
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copy to Clipboard'),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('I\'ve Saved It'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showRenameDialog(BuildContext context, WalletProvider walletProvider, String walletId, String currentName) {
