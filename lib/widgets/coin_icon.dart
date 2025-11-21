@@ -20,8 +20,8 @@ class CoinIcon extends StatelessWidget {
         return 'assets/icons/bitcoin.svg';
       case CoinType.eth:
         return 'assets/icons/ethereum.svg';
-      case CoinType.fil:
-        return 'assets/icons/filecoin.svg';
+      case CoinType.trx:
+        return 'assets/icons/tron.svg';
     }
   }
 
@@ -31,7 +31,6 @@ class CoinIcon extends StatelessWidget {
       _getSvgPath(),
       width: size,
       height: size,
-      // Use colorFilter only if color is provided
       colorFilter: color != null
           ? ColorFilter.mode(color!, BlendMode.srcIn)
           : null,

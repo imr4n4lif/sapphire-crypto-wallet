@@ -46,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshData() async {
+    if (!mounted) return;
     await context.read<WalletProvider>().refreshBalances();
     await context.read<WalletProvider>().refreshTransactions();
   }
@@ -191,72 +192,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final now = DateTime.now();
     final timeString = DateFormat('HH:mm').format(now);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Theme.of(context).colorScheme.primary,
-                Theme.of(context).colorScheme.secondary,
-              ],
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Theme.of(context).colorScheme.primary,
+            Theme.of(context).colorScheme.secondary,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Total Balance',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.9),
+              fontSize: 14,
             ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              formatter.format(walletProvider.totalPortfolioValue),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 36,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
             children: [
+              Icon(
+                Icons.access_time,
+                color: Colors.white.withOpacity(0.9),
+                size: 16,
+              ),
+              const SizedBox(width: 4),
               Text(
-                'Total Balance',
+                'Last updated: $timeString',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
-                  fontSize: 14,
+                  color: Colors.white.withOpacity(0.8),
+                  fontSize: 12,
                 ),
-              ),
-              const SizedBox(height: 8),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  formatter.format(walletProvider.totalPortfolioValue),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Icon(
-                    Icons.access_time,
-                    color: Colors.white.withOpacity(0.9),
-                    size: 16,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'Last updated: $timeString',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -428,12 +425,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         return FlSpot(entry.key.toDouble(), entry.value.value);
                       }).toList(),
                       isCurved: true,
+                      curveSmoothness: 0.35,
                       color: Theme.of(context).colorScheme.primary,
-                      barWidth: 2,
+                      barWidth: 3,
                       dotData: FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
-                        color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+                        gradient: LinearGradient(
+                          colors: [
+                            Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                            Theme.of(context).colorScheme.primary.withOpacity(0.0),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
                       ),
                     ),
                   ],
@@ -603,10 +608,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-// ============================================================================
-// WALLET MENU BOTTOM SHEET - NOW FULLY IMPLEMENTED
-// ============================================================================
-
+// Wallet Menu Bottom Sheet with FIXED loading
 class _WalletMenuSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -621,7 +623,6 @@ class _WalletMenuSheet extends StatelessWidget {
             return Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Handle bar
                 Container(
                   margin: const EdgeInsets.only(top: 12),
                   width: 40,
@@ -631,8 +632,6 @@ class _WalletMenuSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-
-                // Header
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
@@ -649,10 +648,7 @@ class _WalletMenuSheet extends StatelessWidget {
                     ],
                   ),
                 ),
-
                 const Divider(height: 1),
-
-                // Wallet List
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
@@ -735,10 +731,7 @@ class _WalletMenuSheet extends StatelessWidget {
                     },
                   ),
                 ),
-
                 const Divider(height: 1),
-
-                // Add Wallet Buttons
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -783,12 +776,13 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
+  // FIXED: Wallet creation with proper loading handling
   void _showCreateWalletDialog(BuildContext context, WalletProvider walletProvider) {
     final controller = TextEditingController(text: 'Wallet ${walletProvider.allWallets.length + 1}');
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Create New Wallet'),
         content: TextField(
           controller: controller,
@@ -800,7 +794,7 @@ class _WalletMenuSheet extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -813,20 +807,41 @@ class _WalletMenuSheet extends StatelessWidget {
                 return;
               }
 
-              Navigator.pop(context);
+              // Close the name dialog first
+              Navigator.pop(dialogContext);
 
-              // Show loading
+              // Show loading dialog
               showDialog(
                 context: context,
                 barrierDismissible: false,
-                builder: (context) => const Center(child: CircularProgressIndicator()),
+                builder: (loadingContext) => WillPopScope(
+                  onWillPop: () async => false,
+                  child: const Center(
+                    child: Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 16),
+                            Text('Creating wallet...'),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               );
 
               try {
                 final mnemonic = await walletProvider.createNewWallet(name);
 
                 if (context.mounted) {
-                  Navigator.pop(context); // Close loading
+                  // Close loading dialog
+                  Navigator.pop(context);
+
+                  // Show seed phrase dialog
                   _showSeedPhraseDialog(context, mnemonic);
                 }
               } catch (e) {
@@ -887,23 +902,15 @@ class _WalletMenuSheet extends StatelessWidget {
               final name = nameController.text.trim();
               final mnemonic = mnemonicController.text.trim();
 
-              if (name.isEmpty) {
+              if (name.isEmpty || mnemonic.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a wallet name')),
-                );
-                return;
-              }
-
-              if (mnemonic.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter seed phrase')),
+                  const SnackBar(content: Text('Please fill all fields')),
                 );
                 return;
               }
 
               Navigator.pop(context);
 
-              // Show loading
               showDialog(
                 context: context,
                 barrierDismissible: false,
@@ -914,7 +921,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 await walletProvider.importExistingWallet(name, mnemonic);
 
                 if (context.mounted) {
-                  Navigator.pop(context); // Close loading
+                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('✅ Wallet imported successfully'),
@@ -924,7 +931,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 }
               } catch (e) {
                 if (context.mounted) {
-                  Navigator.pop(context); // Close loading
+                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Error: $e'),
@@ -962,7 +969,7 @@ class _WalletMenuSheet extends StatelessWidget {
                   border: Border.all(color: Colors.red),
                 ),
                 child: const Text(
-                  'Write down these 12 words and store them safely. You\'ll need them to recover your wallet.',
+                  'Write down these 12 words and store them safely.',
                   style: TextStyle(fontSize: 12),
                 ),
               ),
@@ -1104,7 +1111,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 border: Border.all(color: Colors.red),
               ),
               child: const Text(
-                'Make sure you have backed up your seed phrase. This action cannot be undone.',
+                'Make sure you have backed up your seed phrase.',
                 style: TextStyle(fontSize: 12),
               ),
             ),
@@ -1119,7 +1126,6 @@ class _WalletMenuSheet extends StatelessWidget {
             onPressed: () async {
               Navigator.pop(context);
 
-              // Show loading
               showDialog(
                 context: context,
                 barrierDismissible: false,
@@ -1130,7 +1136,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 await walletProvider.deleteWalletById(walletId);
 
                 if (context.mounted) {
-                  Navigator.pop(context); // Close loading
+                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('✅ Wallet deleted successfully'),
@@ -1140,7 +1146,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 }
               } catch (e) {
                 if (context.mounted) {
-                  Navigator.pop(context); // Close loading
+                  Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Error: $e'),
@@ -1150,9 +1156,7 @@ class _WalletMenuSheet extends StatelessWidget {
                 }
               }
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
         ],

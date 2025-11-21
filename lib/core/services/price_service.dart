@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import '../constants/app_constants.dart';
 import '../../models/wallet.dart';
 
@@ -8,11 +9,13 @@ class PriceService {
   factory PriceService() => _instance;
   PriceService._internal();
 
-  // Enhanced caching with per-coin timestamps
+  // Enhanced caching
   final Map<CoinType, PriceData> _priceCache = {};
   final Map<String, List<PricePoint>> _historyCache = {};
   final Map<CoinType, DateTime> _lastFetchTime = {};
   final Map<String, DateTime> _historyFetchTime = {};
+
+  final http.Client _client = http.Client();
 
   String _getCoinId(CoinType coinType) {
     switch (coinType) {
@@ -20,14 +23,13 @@ class PriceService {
         return AppConstants.btcCoinId;
       case CoinType.eth:
         return AppConstants.ethCoinId;
-      case CoinType.fil:
-        return AppConstants.filCoinId;
+      case CoinType.trx:
+        return AppConstants.trxCoinId;
     }
   }
 
   Future<PriceData> fetchPrice(CoinType coinType) async {
     try {
-      // Check cache validity (1 minute for real-time prices)
       if (_isCacheFresh(coinType)) {
         return _priceCache[coinType]!;
       }
@@ -37,7 +39,7 @@ class PriceService {
           '?vs_currency=usd&ids=$coinId&order=market_cap_desc'
           '&per_page=1&page=1&sparkline=false&price_change_percentage=24h';
 
-      final response = await http.get(Uri.parse(url)).timeout(
+      final response = await _client.get(Uri.parse(url)).timeout(
         const Duration(seconds: 10),
       );
 
@@ -52,16 +54,13 @@ class PriceService {
           return priceData;
         }
       } else if (response.statusCode == 429) {
-        print('⚠️ Rate limit hit for ${coinType.name}, using cache');
-        // Return cached data if available
+        print('⚠️ Rate limit hit for ${coinType.name}');
         if (_priceCache.containsKey(coinType)) {
           return _priceCache[coinType]!;
         }
       }
 
-      // Return cached data or default
       if (_priceCache.containsKey(coinType)) {
-        print('⚠️ Using cached price for ${coinType.name}');
         return _priceCache[coinType]!;
       }
 
@@ -75,11 +74,10 @@ class PriceService {
   Future<Map<CoinType, PriceData>> fetchAllPrices() async {
     final Map<CoinType, PriceData> prices = {};
 
-    // Fetch concurrently with error handling for each
     final results = await Future.wait([
       fetchPrice(CoinType.btc),
       fetchPrice(CoinType.eth),
-      fetchPrice(CoinType.fil),
+      fetchPrice(CoinType.trx),
     ].map((future) => future.catchError((e) {
       print('Error in fetchAllPrices: $e');
       return PriceData(price: 0.0, change24h: 0.0, history: []);
@@ -87,7 +85,7 @@ class PriceService {
 
     prices[CoinType.btc] = results[0];
     prices[CoinType.eth] = results[1];
-    prices[CoinType.fil] = results[2];
+    prices[CoinType.trx] = results[2];
 
     return prices;
   }
@@ -100,45 +98,38 @@ class PriceService {
     try {
       final cacheKey = '${coinType.name}_$days';
 
-      // Check history cache (5 minutes for history data)
       if (_isHistoryCacheFresh(cacheKey)) {
-        print('📦 Using cached history for ${coinType.name} ($days days)');
         return _historyCache[cacheKey]!;
       }
 
       final coinId = _getCoinId(coinType);
+      String interval;
+      int actualDays = days;
 
-      // Improved interval selection for better chart rendering
-      String interval = 'daily';
-
-      // For 1 hour view (days = 0 or fractional)
-      if (days <= 0) {
-        // Fetch last 24 hours with 5-minute intervals
-        days = 1;
-        interval = 'minutely';
+      // Optimized intervals for each timeframe
+      if (days == 0) {
+        // 1 hour view
+        actualDays = 1;
+        interval = '5m'; // 5-minute intervals
       } else if (days == 1) {
-        // For 24 hours, use 5-minute intervals
-        interval = 'minutely';
+        interval = '5m'; // 24 hours with 5-min intervals
       } else if (days <= 7) {
-        // For 1 week, use hourly data
-        interval = 'hourly';
+        interval = '1h'; // 1 week with hourly data
       } else if (days <= 30) {
-        // For 1 month, use 4-hour intervals
-        interval = 'hourly';
+        interval = '4h'; // 1 month with 4-hour intervals
       } else if (days <= 90) {
-        // For 3 months, use daily
-        interval = 'daily';
+        interval = 'daily'; // 3 months with daily data
       } else {
-        // For 1 year, use daily
-        interval = 'daily';
+        interval = 'daily'; // 1 year with daily data
       }
 
+      // CoinGecko API endpoint
       final url = '${AppConstants.priceApiUrl}/coins/$coinId/market_chart'
-          '?vs_currency=usd&days=$days&interval=$interval';
+          '?vs_currency=usd&days=$actualDays&interval=$interval';
 
-      print('🔄 Fetching price history: ${coinType.name} ($days days, $interval)');
+      print('🔄 Fetching price history: $coinId ($actualDays days, $interval)');
 
-      final response = await http.get(Uri.parse(url)).timeout(
+      final response = await _client.get(Uri.parse(url)).timeout(
         const Duration(seconds: 15),
       );
 
@@ -147,11 +138,11 @@ class PriceService {
         final prices = data['prices'] as List? ?? [];
 
         if (prices.isEmpty) {
-          print('⚠️ No price data returned for ${coinType.name}');
-          return _historyCache[cacheKey] ?? [];
+          print('⚠️ No price data returned');
+          return [];
         }
 
-        // Process and filter data points for optimal chart display
+        // Convert to PricePoint objects
         List<PricePoint> pricePoints = prices.map((point) {
           return PricePoint(
             timestamp: DateTime.fromMillisecondsSinceEpoch(point[0]),
@@ -159,79 +150,49 @@ class PriceService {
           );
         }).toList();
 
-        // Limit data points for better performance
+        // Filter to last hour if requested
+        if (days == 0) {
+          final oneHourAgo = DateTime.now().subtract(const Duration(hours: 1));
+          pricePoints = pricePoints.where((p) => p.timestamp.isAfter(oneHourAgo)).toList();
+        }
+
+        // Sample data if too many points (keep ~200 points max)
         if (pricePoints.length > 200) {
-          // Sample data to keep around 200 points
-          final step = pricePoints.length ~/ 200;
+          final step = (pricePoints.length / 200).ceil();
           pricePoints = [
             for (int i = 0; i < pricePoints.length; i += step)
               pricePoints[i]
           ];
         }
 
+        // Ensure we have the latest point
+        if (pricePoints.isNotEmpty && days == 0) {
+          // For 1-hour view, ensure smooth recent data
+          pricePoints.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        }
+
         _historyCache[cacheKey] = pricePoints;
         _historyFetchTime[cacheKey] = DateTime.now();
 
-        print('✅ Fetched ${pricePoints.length} price points for ${coinType.name}');
+        print('✅ Fetched ${pricePoints.length} price points for $coinId');
         return pricePoints;
       } else if (response.statusCode == 429) {
-        print('⚠️ Rate limit hit for ${coinType.name} history');
+        print('⚠️ Rate limit hit for history');
+        await Future.delayed(const Duration(seconds: 2));
         return _historyCache[cacheKey] ?? [];
-      } else {
-        print('⚠️ HTTP ${response.statusCode} for ${coinType.name} history');
       }
 
       return _historyCache[cacheKey] ?? [];
     } catch (e) {
-      print('❌ Error fetching price history for $coinType: $e');
+      print('❌ Error fetching price history: $e');
       final cacheKey = '${coinType.name}_$days';
       return _historyCache[cacheKey] ?? [];
     }
   }
 
-  // Special method for 1-hour chart data
+  // Specialized method for hourly data
   Future<List<PricePoint>> fetchHourlyHistory(CoinType coinType) async {
-    try {
-      final cacheKey = '${coinType.name}_hourly';
-
-      if (_isHistoryCacheFresh(cacheKey, maxAge: const Duration(minutes: 2))) {
-        return _historyCache[cacheKey]!;
-      }
-
-      final coinId = _getCoinId(coinType);
-
-      // Fetch last 60 minutes with high resolution
-      final url = '${AppConstants.priceApiUrl}/coins/$coinId/market_chart'
-          '?vs_currency=usd&days=0.042&interval=minutely'; // 0.042 days = ~1 hour
-
-      print('🔄 Fetching hourly data for ${coinType.name}');
-
-      final response = await http.get(Uri.parse(url)).timeout(
-        const Duration(seconds: 10),
-      );
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final prices = data['prices'] as List? ?? [];
-
-        final pricePoints = prices.map((point) {
-          return PricePoint(
-            timestamp: DateTime.fromMillisecondsSinceEpoch(point[0]),
-            price: (point[1] as num).toDouble(),
-          );
-        }).toList();
-
-        _historyCache[cacheKey] = pricePoints;
-        _historyFetchTime[cacheKey] = DateTime.now();
-
-        return pricePoints;
-      }
-
-      return [];
-    } catch (e) {
-      print('❌ Error fetching hourly history: $e');
-      return [];
-    }
+    return fetchPriceHistory(coinType, days: 0);
   }
 
   bool _isCacheFresh(CoinType coinType) {
@@ -258,17 +219,19 @@ class PriceService {
     print('🗑️ Price cache cleared');
   }
 
-  // Get sparkline data for mini charts
   Future<List<double>> getSparklineData(CoinType coinType) async {
     try {
       final history = await fetchPriceHistory(coinType, days: 7);
       if (history.isEmpty) return [];
 
-      // Return last 24 data points for sparkline
       final points = history.length > 24 ? history.sublist(history.length - 24) : history;
       return points.map((p) => p.price).toList();
     } catch (e) {
       return [];
     }
+  }
+
+  void dispose() {
+    _client.close();
   }
 }

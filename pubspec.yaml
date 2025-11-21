@@ -1,5 +1,5 @@
 name: crypto_wallet
-description: A production-grade non-custodial crypto wallet for Bitcoin, Ethereum, and Filecoin
+description: A production-grade non-custodial crypto wallet for Bitcoin, Ethereum, and Tron
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -26,6 +26,9 @@ dependencies:
   bitcoin_base: ^4.5.0
   crypto: ^3.0.3
   convert: ^3.1.1
+
+  # Tron Support
+  bs58: ^1.0.0
 
   # HTTP & Networking
   http: ^1.2.1
@@ -72,7 +75,7 @@ flutter:
     - assets/icons/logo.svg
     - assets/icons/bitcoin.svg
     - assets/icons/ethereum.svg
-    - assets/icons/filecoin.svg
+    - assets/icons/tron.svg
     - .env
 
   fonts:

@@ -16,47 +16,47 @@ class AppConstants {
   // BIP44 Derivation Paths
   static const String btcMainnetPath = "m/44'/0'/0'/0/0";
   static const String btcTestnetPath = "m/44'/1'/0'/0/0";
-
   static const String ethPath = "m/44'/60'/0'/0/0";
-  static const String filPath = "m/44'/461'/0'/0/0";
+  static const String trxPath = "m/44'/195'/0'/0/0";
 
   // Get API Keys from .env
   static String get infuraProjectId => dotenv.env['INFURA_PROJECT_ID'] ?? '';
   static String get etherscanApiKey => dotenv.env['ETHERSCAN_API_KEY'] ?? '';
+  static String get tronGridApiKey => dotenv.env['TRONGRID_API_KEY'] ?? '';
 
   // Network URLs
   static String get ethMainnetRpc => 'https://mainnet.infura.io/v3/$infuraProjectId';
   static String get ethTestnetRpc => 'https://sepolia.infura.io/v3/$infuraProjectId';
 
-  // Bitcoin
+  // Bitcoin - Using reliable APIs
   static const String btcMainnetApi = 'https://blockstream.info/api';
-  static const String btcTestnetApi = 'https://mempool.space/testnet4/api';
+  static const String btcTestnetApi = 'https://blockstream.info/testnet/api';
 
   // Etherscan API
   static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/api';
   static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/api';
 
-  // Filecoin
-  static const String filMainnetRpc = 'https://api.node.glif.io';
-  static const String filTestnetRpc = 'https://api.calibration.node.glif.io';
+  // Tron - TronGrid API
+  static const String trxMainnetApi = 'https://api.trongrid.io';
+  static const String trxTestnetApi = 'https://api.shasta.trongrid.io';
 
-  // Price API
+  // Price API - CoinGecko (free, no key required)
   static const String priceApiUrl = 'https://api.coingecko.com/api/v3';
 
-  // Coin IDs
+  // Coin IDs for price API
   static const String btcCoinId = 'bitcoin';
   static const String ethCoinId = 'ethereum';
-  static const String filCoinId = 'filecoin';
+  static const String trxCoinId = 'tron';
 
   // Confirmations
   static const int btcConfirmations = 3;
   static const int ethConfirmations = 12;
-  static const int filConfirmations = 30;
+  static const int trxConfirmations = 19;
 
   // Decimals
   static const int btcDecimals = 8;
   static const int ethDecimals = 18;
-  static const int filDecimals = 18;
+  static const int trxDecimals = 6;
 }
 
 enum NetworkType {
@@ -67,7 +67,7 @@ enum NetworkType {
 enum CoinType {
   btc,
   eth,
-  fil,
+  trx,
 }
 
 class CoinInfo {
@@ -97,14 +97,14 @@ class CoinInfo {
     type: CoinType.eth,
   );
 
-  static const fil = CoinInfo(
-    name: 'Filecoin',
-    symbol: 'FIL',
-    icon: '⨎',
-    type: CoinType.fil,
+  static const trx = CoinInfo(
+    name: 'Tron',
+    symbol: 'TRX',
+    icon: 'Ⓣ',
+    type: CoinType.trx,
   );
 
-  static List<CoinInfo> get allCoins => [btc, eth, fil];
+  static List<CoinInfo> get allCoins => [btc, eth, trx];
 }
 
 // Helper functions for wallet service
@@ -115,8 +115,8 @@ class WalletHelper {
         return wallet.btcPrivateKey;
       case CoinType.eth:
         return wallet.ethPrivateKey;
-      case CoinType.fil:
-        return wallet.filPrivateKey;
+      case CoinType.trx:
+        return wallet.trxPrivateKey;
     }
   }
 
@@ -126,8 +126,8 @@ class WalletHelper {
         return wallet.btcAddress;
       case CoinType.eth:
         return wallet.ethAddress;
-      case CoinType.fil:
-        return wallet.filAddress;
+      case CoinType.trx:
+        return wallet.trxAddress;
     }
   }
 }

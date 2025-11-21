@@ -27,7 +27,7 @@ class WalletProvider with ChangeNotifier {
   Map<CoinType, List<Transaction>> _transactions = {};
   Map<CoinType, String> _lastKnownTxHash = {};
 
-  // Portfolio history - now time-based
+  // Network-separated portfolio history
   Map<String, List<PortfolioDataPoint>> _walletPortfolioHistory = {};
 
   Timer? _autoRefreshTimer;
@@ -49,7 +49,8 @@ class WalletProvider with ChangeNotifier {
 
   List<PortfolioDataPoint> get currentWalletPortfolioHistory {
     if (_currentWalletId == null) return [];
-    return _walletPortfolioHistory[_currentWalletId!] ?? [];
+    final key = '${_currentWalletId}_${_isMainnet ? "mainnet" : "testnet"}';
+    return _walletPortfolioHistory[key] ?? [];
   }
 
   String? _getCurrentWalletName() {
@@ -82,31 +83,25 @@ class WalletProvider with ChangeNotifier {
 
         await _loadCurrentWallet();
 
-        // Load data in background to avoid blocking UI
-        _loadDataInBackground();
+        // Fast background loading
+        Future.microtask(() async {
+          try {
+            await refreshBalances();
+            await Future.delayed(const Duration(milliseconds: 100));
+            await refreshTransactions();
+          } catch (e) {
+            print('❌ Error: $e');
+          }
+        });
 
         _startAutoRefresh();
       }
     } catch (e) {
-      print('❌ Error initializing wallet: $e');
+      print('❌ Error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
-  }
-
-  // Load balances and transactions in background without blocking
-  Future<void> _loadDataInBackground() async {
-    // Use microtask to avoid blocking main thread
-    Future.microtask(() async {
-      try {
-        await refreshBalances();
-        await Future.delayed(const Duration(milliseconds: 100));
-        await refreshTransactions();
-      } catch (e) {
-        print('❌ Error loading background data: $e');
-      }
-    });
   }
 
   Future<void> _loadAllWallets() async {
@@ -155,18 +150,16 @@ class WalletProvider with ChangeNotifier {
 
   void _updatePortfolioHistory(double value) {
     if (_currentWalletId == null) return;
+    final key = '${_currentWalletId}_${_isMainnet ? "mainnet" : "testnet"}';
 
-    if (!_walletPortfolioHistory.containsKey(_currentWalletId!)) {
-      _walletPortfolioHistory[_currentWalletId!] = [];
+    if (!_walletPortfolioHistory.containsKey(key)) {
+      _walletPortfolioHistory[key] = [];
     }
 
     final now = DateTime.now();
-    final history = _walletPortfolioHistory[_currentWalletId!]!;
+    final history = _walletPortfolioHistory[key]!;
 
-    // Remove entries older than 1 year
     history.removeWhere((p) => now.difference(p.timestamp).inDays > 365);
-
-    // Add new entry
     history.add(PortfolioDataPoint(timestamp: now, value: value));
 
     _savePortfolioHistory();
@@ -195,7 +188,7 @@ class WalletProvider with ChangeNotifier {
         'name': name,
         'ethAddress': walletData.ethAddress,
         'btcAddress': walletData.btcAddress,
-        'filAddress': walletData.filAddress,
+        'trxAddress': walletData.trxAddress,
         'createdAt': DateTime.now().toIso8601String(),
       });
 
@@ -224,7 +217,7 @@ class WalletProvider with ChangeNotifier {
         'name': name,
         'ethAddress': walletData.ethAddress,
         'btcAddress': walletData.btcAddress,
-        'filAddress': walletData.filAddress,
+        'trxAddress': walletData.trxAddress,
         'createdAt': DateTime.now().toIso8601String(),
       });
 
@@ -250,8 +243,15 @@ class WalletProvider with ChangeNotifier {
 
     await _loadCurrentWallet();
 
-    // Load data in background
-    _loadDataInBackground();
+    Future.microtask(() async {
+      try {
+        await refreshBalances();
+        await Future.delayed(const Duration(milliseconds: 100));
+        await refreshTransactions();
+      } catch (e) {
+        print('❌ Error: $e');
+      }
+    });
 
     notifyListeners();
   }
@@ -263,7 +263,9 @@ class WalletProvider with ChangeNotifier {
 
     await _storage.deleteSecure('mnemonic_$walletId');
     _allWallets.removeWhere((w) => w['id'] == walletId);
-    _walletPortfolioHistory.remove(walletId);
+
+    _walletPortfolioHistory.remove('${walletId}_mainnet');
+    _walletPortfolioHistory.remove('${walletId}_testnet');
 
     await _saveAllWallets();
     await _savePortfolioHistory();
@@ -277,7 +279,6 @@ class WalletProvider with ChangeNotifier {
 
   void _startAutoRefresh() {
     _stopAutoRefresh();
-
     _autoRefreshTimer = Timer.periodic(_refreshInterval, (timer) async {
       if (!_isRefreshing) {
         await refreshBalances();
@@ -309,7 +310,7 @@ class WalletProvider with ChangeNotifier {
         'name': name,
         'ethAddress': _wallet!.ethAddress,
         'btcAddress': _wallet!.btcAddress,
-        'filAddress': _wallet!.filAddress,
+        'trxAddress': _wallet!.trxAddress,
         'createdAt': DateTime.now().toIso8601String(),
       });
 
@@ -317,8 +318,10 @@ class WalletProvider with ChangeNotifier {
       await _storage.saveString('current_wallet_id', walletId);
       await _saveAllWallets();
 
-      // Load data in background
-      _loadDataInBackground();
+      Future.microtask(() async {
+        await refreshBalances();
+        await refreshTransactions();
+      });
 
       _startAutoRefresh();
 
@@ -354,7 +357,7 @@ class WalletProvider with ChangeNotifier {
         'name': 'Imported Wallet',
         'ethAddress': _wallet!.ethAddress,
         'btcAddress': _wallet!.btcAddress,
-        'filAddress': _wallet!.filAddress,
+        'trxAddress': _wallet!.trxAddress,
         'createdAt': DateTime.now().toIso8601String(),
       });
 
@@ -362,8 +365,10 @@ class WalletProvider with ChangeNotifier {
       await _storage.saveString('current_wallet_id', walletId);
       await _saveAllWallets();
 
-      // Load data in background
-      _loadDataInBackground();
+      Future.microtask(() async {
+        await refreshBalances();
+        await refreshTransactions();
+      });
 
       _startAutoRefresh();
 
@@ -424,21 +429,19 @@ class WalletProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // Fetch prices first (parallel)
       final prices = await _priceService.fetchAllPrices();
 
-      // Fetch balances with staggered delays to respect rate limits
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 400));
 
       final ethBalance = await _blockchainService.getEthereumBalance(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 400));
 
-      final filBalance = await _blockchainService.getFilecoinBalance(_wallet!.filAddress);
+      final trxBalance = await _blockchainService.getTronBalance(_wallet!.trxAddress);
 
       final btcPrice = prices[CoinType.btc]?.price ?? 0.0;
       final ethPrice = prices[CoinType.eth]?.price ?? 0.0;
-      final filPrice = prices[CoinType.fil]?.price ?? 0.0;
+      final trxPrice = prices[CoinType.trx]?.price ?? 0.0;
 
       _balances = {
         CoinType.btc: CoinBalance(
@@ -455,18 +458,18 @@ class WalletProvider with ChangeNotifier {
           usdValue: ethBalance * ethPrice,
           change24h: prices[CoinType.eth]?.change24h ?? 0.0,
         ),
-        CoinType.fil: CoinBalance(
-          coinType: CoinType.fil,
-          balance: filBalance,
-          pricePerCoin: filPrice,
-          usdValue: filBalance * filPrice,
-          change24h: prices[CoinType.fil]?.change24h ?? 0.0,
+        CoinType.trx: CoinBalance(
+          coinType: CoinType.trx,
+          balance: trxBalance,
+          pricePerCoin: trxPrice,
+          usdValue: trxBalance * trxPrice,
+          change24h: prices[CoinType.trx]?.change24h ?? 0.0,
         ),
       };
 
       _updatePortfolioHistory(totalPortfolioValue);
     } catch (e) {
-      print('❌ Error refreshing balances: $e');
+      print('❌ Error: $e');
     } finally {
       _isRefreshing = false;
       notifyListeners();
@@ -478,26 +481,26 @@ class WalletProvider with ChangeNotifier {
 
     try {
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 1000));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 1000));
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      final filTxs = await _blockchainService.getFilecoinTransactions(_wallet!.filAddress);
+      final trxTxs = await _blockchainService.getTronTransactions(_wallet!.trxAddress);
 
       _checkForNewTransactions(CoinType.btc, btcTxs);
       _checkForNewTransactions(CoinType.eth, ethTxs);
-      _checkForNewTransactions(CoinType.fil, filTxs);
+      _checkForNewTransactions(CoinType.trx, trxTxs);
 
       _transactions = {
         CoinType.btc: btcTxs,
         CoinType.eth: ethTxs,
-        CoinType.fil: filTxs,
+        CoinType.trx: trxTxs,
       };
 
       notifyListeners();
     } catch (e) {
-      print('❌ Error refreshing transactions: $e');
+      print('❌ Error: $e');
     }
   }
 
@@ -537,7 +540,7 @@ class WalletProvider with ChangeNotifier {
             toAddress: toAddress,
             privateKeyHex: _wallet!.btcPrivateKey,
             amount: amount,
-            feeRate: 10.0, // sats/byte
+            feeRate: 10.0,
           );
           break;
         case CoinType.eth:
@@ -547,8 +550,13 @@ class WalletProvider with ChangeNotifier {
             amount: amount,
           );
           break;
-        case CoinType.fil:
-          throw UnimplementedError('Filecoin sending not yet implemented');
+        case CoinType.trx:
+          txHash = await _blockchainService.sendTron(
+            toAddress: toAddress,
+            privateKey: _wallet!.trxPrivateKey,
+            amount: amount,
+          );
+          break;
       }
 
       await _notificationService.showTransactionSent(
@@ -557,7 +565,7 @@ class WalletProvider with ChangeNotifier {
         txHash: txHash,
       );
 
-      Future.delayed(const Duration(seconds: 5), () async {
+      Future.delayed(const Duration(seconds: 3), () async {
         await refreshBalances();
         await refreshTransactions();
       });

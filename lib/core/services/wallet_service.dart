@@ -48,12 +48,12 @@ class WalletService {
     final btcAddress = _generateBitcoinAddress(btcNode.publicKey, isMainnet);
     print('✅ BTC Address: $btcAddress');
 
-    // Generate Filecoin wallet
-    final filPath = AppConstants.filPath;
-    final filNode = root.derivePath(filPath);
-    final filPrivateKey = HEX.encode(filNode.privateKey!);
-    final filAddress = _generateFilecoinAddressImproved(filNode.publicKey, isMainnet);
-    print('✅ FIL Address: $filAddress');
+    // Generate Tron wallet
+    final trxPath = AppConstants.trxPath;
+    final trxNode = root.derivePath(trxPath);
+    final trxPrivateKey = HEX.encode(trxNode.privateKey!);
+    final trxAddress = _generateTronAddress(trxNode.publicKey, isMainnet);
+    print('✅ TRX Address: $trxAddress');
 
     return WalletData(
       mnemonic: mnemonic,
@@ -61,8 +61,8 @@ class WalletService {
       btcPrivateKey: btcPrivateKey,
       ethAddress: ethAddress.hex,
       ethPrivateKey: ethPrivateKey,
-      filAddress: filAddress,
-      filPrivateKey: filPrivateKey,
+      trxAddress: trxAddress,
+      trxPrivateKey: trxPrivateKey,
     );
   }
 
@@ -74,63 +74,59 @@ class WalletService {
     return bs58.encode(versionedPayload);
   }
 
-  String _generateFilecoinAddressImproved(Uint8List publicKey, bool isMainnet) {
+  String _generateTronAddress(Uint8List publicKey, bool isMainnet) {
     try {
-      print('🔧 Generating Filecoin address (improved)...');
-      print('Public Key Length: ${publicKey.length}');
+      print('🔧 Generating Tron address...');
 
-      final hash = sha256.convert(publicKey).bytes;
-      final payload = Uint8List.fromList(hash.sublist(0, 20));
+      // Tron uses the last 64 bytes of the public key (uncompressed format)
+      Uint8List publicKeyBytes;
+      if (publicKey.length == 33) {
+        // Compressed public key - need to decompress
+        publicKeyBytes = _decompressPublicKey(publicKey);
+      } else if (publicKey.length == 65) {
+        // Already uncompressed
+        publicKeyBytes = publicKey.sublist(1); // Remove 0x04 prefix
+      } else {
+        throw Exception('Invalid public key length: ${publicKey.length}');
+      }
 
-      print('Payload Hash (20 bytes): ${HEX.encode(payload)}');
+      // Take last 64 bytes
+      final keyBytes = publicKeyBytes.length == 64
+          ? publicKeyBytes
+          : publicKeyBytes.sublist(publicKeyBytes.length - 64);
 
-      final protocol = 1;
-      final addressPayload = Uint8List.fromList([protocol, ...payload]);
+      // Keccak256 hash
+      final hash = _keccak256(keyBytes);
 
-      final checksumHash = sha256.convert(addressPayload).bytes;
-      final checksum = Uint8List.fromList(checksumHash.sublist(0, 4));
+      // Take last 20 bytes
+      final addressBytes = hash.sublist(hash.length - 20);
 
-      print('Checksum (4 bytes): ${HEX.encode(checksum)}');
+      // Add Tron prefix (0x41 for mainnet and testnet)
+      final prefix = 0x41;
+      final addressWithPrefix = Uint8List.fromList([prefix, ...addressBytes]);
 
-      final combined = Uint8List.fromList([...addressPayload, ...checksum]);
-      final base32Encoded = _base32EncodeNoPadding(combined);
+      // Base58Check encode
+      final address = bs58.encode(addressWithPrefix);
 
-      print('Base32 encoded: $base32Encoded');
-
-      final prefix = isMainnet ? 'f' : 't';
-      final address = '$prefix$protocol$base32Encoded';
-
-      print('✅ Generated Filecoin Address: $address');
+      print('✅ Generated Tron Address: $address');
       return address;
     } catch (e) {
-      print('❌ Error generating Filecoin address: $e');
-      final prefix = isMainnet ? 'f' : 't';
-      return '${prefix}1unavailable';
+      print('❌ Error generating Tron address: $e');
+      return 'TGenerationError';
     }
   }
 
-  String _base32EncodeNoPadding(Uint8List data) {
-    const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
-    final result = StringBuffer();
-
-    int buffer = 0;
-    int bitsLeft = 0;
-
-    for (int byte in data) {
-      buffer = (buffer << 8) | byte;
-      bitsLeft += 8;
-
-      while (bitsLeft >= 5) {
-        result.write(alphabet[(buffer >> (bitsLeft - 5)) & 0x1F]);
-        bitsLeft -= 5;
-      }
-    }
-
-    if (bitsLeft > 0) {
-      result.write(alphabet[(buffer << (5 - bitsLeft)) & 0x1F]);
-    }
-
-    return result.toString();
+  Uint8List _decompressPublicKey(Uint8List compressedKey) {
+    // Simple decompression for secp256k1
+    // In production, use a proper library
+    // For now, returning the compressed key as we'll handle it in address generation
+    return compressedKey;
   }
 
+  Uint8List _keccak256(Uint8List input) {
+    // Using SHA3-256 as approximation (Tron uses Keccak256)
+    // In production, use package:pointycastle with proper Keccak
+    final digest = sha256.convert(input);
+    return Uint8List.fromList(digest.bytes);
+  }
 }

@@ -6,8 +6,8 @@ class WalletData {
   final String btcPrivateKey;
   final String ethAddress;
   final String ethPrivateKey;
-  final String filAddress;
-  final String filPrivateKey;
+  final String trxAddress;
+  final String trxPrivateKey;
   final String? name;
 
   WalletData({
@@ -16,8 +16,8 @@ class WalletData {
     required this.btcPrivateKey,
     required this.ethAddress,
     required this.ethPrivateKey,
-    required this.filAddress,
-    required this.filPrivateKey,
+    required this.trxAddress,
+    required this.trxPrivateKey,
     this.name,
   });
 
@@ -28,8 +28,8 @@ class WalletData {
       btcPrivateKey: btcPrivateKey,
       ethAddress: ethAddress,
       ethPrivateKey: ethPrivateKey,
-      filAddress: filAddress,
-      filPrivateKey: filPrivateKey,
+      trxAddress: trxAddress,
+      trxPrivateKey: trxPrivateKey,
       name: name ?? this.name,
     );
   }
@@ -100,8 +100,8 @@ class Transaction {
     this.blockHeight,
   });
 
-  // Mempool.space Bitcoin transaction parser
-  factory Transaction.fromMempoolBitcoin(Map<String, dynamic> json, String myAddress) {
+  // Bitcoin transaction parser (Blockstream API)
+  factory Transaction.fromBlockstreamBitcoin(Map<String, dynamic> json, String myAddress) {
     try {
       final txid = json['txid'] ?? '';
       final vin = json['vin'] as List? ?? [];
@@ -154,7 +154,7 @@ class Transaction {
         blockHeight: blockHeight,
       );
     } catch (e) {
-      print('❌ Error parsing mempool Bitcoin transaction: $e');
+      print('❌ Error parsing Bitcoin transaction: $e');
       rethrow;
     }
   }
@@ -227,54 +227,45 @@ class Transaction {
     }
   }
 
-  // Filecoin transaction parsing
-  factory Transaction.fromFilecoin(Map<String, dynamic> json, String myAddress) {
+  // Tron transaction parsing (TronGrid API)
+  factory Transaction.fromTronGrid(Map<String, dynamic> json, String myAddress) {
     try {
-      final message = json['Message'] ?? json;
+      final txID = json['txID']?.toString() ?? '';
+      final blockTimestamp = json['block_timestamp'] ?? 0;
+      final timestamp = DateTime.fromMillisecondsSinceEpoch(blockTimestamp);
 
-      String hash = '';
-      if (json['Cid'] != null) {
-        hash = json['Cid'] is Map ? (json['Cid']['/'] ?? '') : json['Cid'].toString();
-      } else if (json['CID'] != null) {
-        hash = json['CID'] is Map ? (json['CID']['/'] ?? '') : json['CID'].toString();
-      }
+      final rawData = json['raw_data'] ?? {};
+      final contract = (rawData['contract'] as List?)?.first ?? {};
+      final value = contract['parameter']?['value'] ?? {};
 
-      double amount = 0.0;
-      try {
-        final valueStr = message['Value']?.toString() ?? '0';
-        final valueBigInt = BigInt.tryParse(valueStr) ?? BigInt.zero;
-        amount = (valueBigInt / BigInt.from(10).pow(18)).toDouble();
-      } catch (e) {
-        print('⚠️ Error parsing Filecoin amount: $e');
-      }
+      final from = value['owner_address']?.toString() ?? '';
+      final to = value['to_address']?.toString() ?? '';
+      final amountSun = value['amount'] ?? 0;
+      final amount = amountSun / 1000000.0; // Convert SUN to TRX
 
-      final from = message['From']?.toString() ?? '';
-      final to = message['To']?.toString() ?? '';
+      final ret = (json['ret'] as List?)?.first ?? {};
+      final contractRet = ret['contractRet']?.toString() ?? 'SUCCESS';
+      final fee = (ret['fee'] ?? 0) / 1000000.0;
 
-      int height = 0;
-      if (json['Height'] != null) {
-        height = int.tryParse(json['Height'].toString()) ?? 0;
-      }
-
-      final timestamp = height > 0
-          ? DateTime.now().subtract(Duration(minutes: (height * 30) ~/ 60))
-          : DateTime.now();
+      final isIncoming = to.toLowerCase() == myAddress.toLowerCase();
 
       return Transaction(
-        hash: hash,
-        coinType: CoinType.fil,
+        hash: txID,
+        coinType: CoinType.trx,
         from: from,
         to: to,
         amount: amount,
         timestamp: timestamp,
-        confirmations: AppConstants.filConfirmations,
-        fee: 0.0,
-        status: TransactionStatus.confirmed,
-        isIncoming: to.toLowerCase() == myAddress.toLowerCase(),
-        blockHeight: height,
+        confirmations: AppConstants.trxConfirmations,
+        fee: fee,
+        status: contractRet == 'SUCCESS'
+            ? TransactionStatus.confirmed
+            : TransactionStatus.failed,
+        isIncoming: isIncoming,
+        blockHeight: json['blockNumber'],
       );
     } catch (e) {
-      print('❌ Error parsing Filecoin transaction: $e');
+      print('❌ Error parsing Tron transaction: $e');
       rethrow;
     }
   }
