@@ -1,3 +1,6 @@
+// COMPLETE REPLACEMENT FOR lib/core/services/blockchain_service.dart
+// DELETE THE ENTIRE OLD FILE AND REPLACE WITH THIS
+
 import 'package:http/http.dart' as http;
 import 'package:web3dart/web3dart.dart' as web3dart;
 import 'dart:convert';
@@ -6,6 +9,14 @@ import 'dart:typed_data';
 import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
 import 'package:bitcoin_base/bitcoin_base.dart';
+import 'package:crypto/crypto.dart';
+import 'package:pointycastle/ecc/curves/secp256k1.dart';
+import 'package:pointycastle/ecc/api.dart';
+import 'package:pointycastle/api.dart';
+import 'package:pointycastle/digests/sha256.dart';
+import 'package:pointycastle/macs/hmac.dart';
+import 'package:pointycastle/signers/ecdsa_signer.dart';
+import 'package:bs58check/bs58check.dart' as bs58;
 
 class BlockchainService {
   static final BlockchainService _instance = BlockchainService._internal();
@@ -15,14 +26,12 @@ class BlockchainService {
   late web3dart.Web3Client _ethClient;
   bool _isMainnet = true;
 
-  // Optimized rate limiting
   DateTime? _lastBtcApiCall;
   DateTime? _lastEthApiCall;
   DateTime? _lastTrxApiCall;
   Duration _apiCallDelay = const Duration(milliseconds: 500);
   static const int _maxRetries = 3;
 
-  // Enhanced caching
   final Map<String, _CachedData> _cache = {};
   static const Duration _balanceCacheTTL = Duration(minutes: 2);
   static const Duration _txCacheTTL = Duration(minutes: 3);
@@ -42,7 +51,7 @@ class BlockchainService {
     print('🔗 Blockchain service initialized (${isMainnet ? "Mainnet" : "Testnet"})');
   }
 
-  // BITCOIN - Using Mempool.space for testnet4 and mainnet
+  // ============ BITCOIN METHODS ============
   Future<double> getBitcoinBalance(String address) async {
     try {
       final cacheKey = 'btc_balance_$address';
@@ -53,7 +62,6 @@ class BlockchainService {
       await _respectRateLimit(_lastBtcApiCall);
       _lastBtcApiCall = DateTime.now();
 
-      // Use mempool.space API - better for testnet4
       final url = _isMainnet
           ? 'https://mempool.space/api/address/$address'
           : 'https://mempool.space/testnet4/api/address/$address';
@@ -81,54 +89,42 @@ class BlockchainService {
     }
   }
 
-Future<List<Transaction>> getBitcoinTransactions(String address) async {
-  try {
-    final cacheKey = 'btc_tx_$address';
-    if (_isCacheValid(cacheKey, _txCacheTTL)) {
-      return _cache[cacheKey]!.data as List<Transaction>;
+  Future<List<Transaction>> getBitcoinTransactions(String address) async {
+    try {
+      final cacheKey = 'btc_tx_$address';
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
+        return _cache[cacheKey]!.data as List<Transaction>;
+      }
+
+      await _respectRateLimit(_lastBtcApiCall);
+      _lastBtcApiCall = DateTime.now();
+
+      final url = _isMainnet
+          ? 'https://mempool.space/api/address/$address/txs'
+          : 'https://mempool.space/testnet4/api/address/$address/txs';
+
+      final response = await _makeHttpRequest(url);
+
+      if (response != null && response.statusCode == 200) {
+        final txs = json.decode(response.body) as List;
+        final transactions = txs.take(20).map((tx) {
+          try {
+            return Transaction.fromBlockstreamBitcoin(tx, address);
+          } catch (e) {
+            return null;
+          }
+        }).whereType<Transaction>().toList();
+
+        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+        return transactions;
+      }
+
+      return _cache[cacheKey]?.data as List<Transaction>? ?? [];
+    } catch (e) {
+      print('❌ BTC transactions error: $e');
+      return _cache['btc_tx_$address']?.data as List<Transaction>? ?? [];
     }
-
-    await _respectRateLimit(_lastBtcApiCall);
-    _lastBtcApiCall = DateTime.now();
-
-    final url = _isMainnet
-        ? 'https://mempool.space/api/address/$address/txs'
-        : 'https://mempool.space/testnet4/api/address/$address/txs';
-
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🔍 BITCOIN Transaction Fetch');
-    print('   My Address: $address');
-    print('   Network: ${_isMainnet ? "MAINNET" : "TESTNET4"}');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-    final response = await _makeHttpRequest(url);
-
-    if (response != null && response.statusCode == 200) {
-      final txs = json.decode(response.body) as List;
-      print('📦 Received ${txs.length} BTC transactions from API');
-
-      final transactions = txs.take(20).map((tx) {
-        try {
-          return Transaction.fromBlockstreamBitcoin(tx, address);
-        } catch (e) {
-          print('   ⚠️ Error parsing BTC tx: $e');
-          return null;
-        }
-      }).whereType<Transaction>().toList();
-
-      print('✅ Successfully parsed ${transactions.length} BTC transactions');
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-      _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-      return transactions;
-    }
-
-    return _cache[cacheKey]?.data as List<Transaction>? ?? [];
-  } catch (e) {
-    print('❌ BTC transactions error: $e\n');
-    return _cache['btc_tx_$address']?.data as List<Transaction>? ?? [];
   }
-}
 
   Future<String> sendBitcoin({
     required String fromAddress,
@@ -138,8 +134,6 @@ Future<List<Transaction>> getBitcoinTransactions(String address) async {
     required double feeRate,
   }) async {
     try {
-      print('📤 Preparing Bitcoin transaction...');
-
       if (!_validateBitcoinAddress(toAddress)) {
         throw Exception('Invalid recipient Bitcoin address');
       }
@@ -242,13 +236,12 @@ Future<List<Transaction>> getBitcoinTransactions(String address) async {
     if (_isMainnet) {
       return address.startsWith('1') || address.startsWith('3') || address.startsWith('bc1');
     } else {
-      // Testnet4 addresses
       return address.startsWith('m') || address.startsWith('n') ||
           address.startsWith('2') || address.startsWith('tb1');
     }
   }
 
-  // ETHEREUM
+  // ============ ETHEREUM METHODS ============
   Future<double> getEthereumBalance(String address) async {
     try {
       final cacheKey = 'eth_balance_$address';
@@ -261,7 +254,6 @@ Future<List<Transaction>> getBitcoinTransactions(String address) async {
       final balanceEth = balance.getValueInUnit(web3dart.EtherUnit.ether);
 
       _cache[cacheKey] = _CachedData(balanceEth, DateTime.now());
-      print('✅ ETH Balance: $balanceEth');
       return balanceEth;
     } catch (e) {
       print('❌ ETH balance error: $e');
@@ -269,76 +261,53 @@ Future<List<Transaction>> getBitcoinTransactions(String address) async {
     }
   }
 
-Future<List<Transaction>> getEthereumTransactions(String address) async {
-  try {
-    final cacheKey = 'eth_tx_$address';
-    if (_isCacheValid(cacheKey, _txCacheTTL)) {
-      return _cache[cacheKey]!.data as List<Transaction>;
-    }
+  Future<List<Transaction>> getEthereumTransactions(String address) async {
+    try {
+      final cacheKey = 'eth_tx_$address';
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
+        return _cache[cacheKey]!.data as List<Transaction>;
+      }
 
-    await _respectRateLimit(_lastEthApiCall);
-    _lastEthApiCall = DateTime.now();
+      await _respectRateLimit(_lastEthApiCall);
+      _lastEthApiCall = DateTime.now();
 
-    final apiKey = AppConstants.etherscanApiKey;
-    if (apiKey.isEmpty) {
-      print('⚠️ Etherscan API key not configured\n');
+      final apiKey = AppConstants.etherscanApiKey;
+      if (apiKey.isEmpty) return [];
+
+      final baseUrl = _isMainnet
+          ? AppConstants.ethMainnetEtherscanV2
+          : AppConstants.ethTestnetEtherscanV2;
+
+      final url = '$baseUrl?module=account&action=txlist'
+          '&address=$address&startblock=0&endblock=99999999'
+          '&page=1&offset=20&sort=desc&apikey=$apiKey';
+
+      final response = await _makeHttpRequest(url);
+
+      if (response != null && response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        if (data['status'] == '1' && data['result'] is List) {
+          final txList = data['result'] as List;
+          final transactions = txList.map((tx) {
+            try {
+              return Transaction.fromEtherscanV2(tx, address);
+            } catch (e) {
+              return null;
+            }
+          }).whereType<Transaction>().toList();
+
+          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+          return transactions;
+        }
+      }
+
+      return [];
+    } catch (e) {
+      print('❌ ETH transactions error: $e');
       return [];
     }
-
-    final baseUrl = _isMainnet
-        ? AppConstants.ethMainnetEtherscanV2
-        : AppConstants.ethTestnetEtherscanV2;
-
-    final url = '$baseUrl?module=account&action=txlist'
-        '&address=$address&startblock=0&endblock=99999999'
-        '&page=1&offset=20&sort=desc&apikey=$apiKey';
-
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🔍 ETHEREUM Transaction Fetch');
-    print('   My Address: $address');
-    print('   Network: ${_isMainnet ? "MAINNET" : "SEPOLIA"}');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-    final response = await _makeHttpRequest(url);
-
-    if (response != null && response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      print('📡 Etherscan Response: ${data['status']} - ${data['message']}');
-
-      if (data['status'] == '1' && data['result'] is List) {
-        final txList = data['result'] as List;
-        print('📦 Received ${txList.length} ETH transactions from API');
-
-        final transactions = txList
-            .map((tx) {
-          try {
-            return Transaction.fromEtherscanV2(tx, address);
-          } catch (e) {
-            print('   ⚠️ Error parsing ETH tx: $e');
-            return null;
-          }
-        })
-            .whereType<Transaction>()
-            .toList();
-
-        print('✅ Successfully parsed ${transactions.length} ETH transactions');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-        return transactions;
-      } else {
-        print('⚠️ No transactions found or API error');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      }
-    }
-
-    return [];
-  } catch (e) {
-    print('❌ ETH transactions error: $e\n');
-    return [];
   }
-}
 
   Future<String> sendEthereum({
     required String toAddress,
@@ -346,8 +315,6 @@ Future<List<Transaction>> getEthereumTransactions(String address) async {
     required double amount,
   }) async {
     try {
-      print('📤 Preparing Ethereum transaction...');
-
       if (!toAddress.startsWith('0x') || toAddress.length != 42) {
         throw Exception('Invalid Ethereum address format');
       }
@@ -457,7 +424,7 @@ Future<List<Transaction>> getEthereumTransactions(String address) async {
     }
   }
 
-  // TRON - IMPLEMENTED
+  // ============ TRON METHODS ============
   Future<double> getTronBalance(String address) async {
     try {
       final cacheKey = 'trx_balance_$address';
@@ -498,96 +465,66 @@ Future<List<Transaction>> getEthereumTransactions(String address) async {
     }
   }
 
-Future<List<Transaction>> getTronTransactions(String address) async {
-  try {
-    final cacheKey = 'trx_tx_$address';
-    if (_isCacheValid(cacheKey, _txCacheTTL)) {
-      return _cache[cacheKey]!.data as List<Transaction>;
-    }
+  Future<List<Transaction>> getTronTransactions(String address) async {
+    try {
+      final cacheKey = 'trx_tx_$address';
+      if (_isCacheValid(cacheKey, _txCacheTTL)) {
+        return _cache[cacheKey]!.data as List<Transaction>;
+      }
 
-    await _respectRateLimit(_lastTrxApiCall);
-    _lastTrxApiCall = DateTime.now();
+      await _respectRateLimit(_lastTrxApiCall);
+      _lastTrxApiCall = DateTime.now();
 
-    final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
-    final url = '$baseUrl/v1/accounts/$address/transactions?limit=20';
+      final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
+      final url = '$baseUrl/v1/accounts/$address/transactions?limit=20';
 
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🔍 TRON Transaction Fetch');
-    print('   My Address: $address');
-    print('   Network: ${_isMainnet ? "MAINNET" : "SHASTA"}');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (AppConstants.tronGridApiKey.isNotEmpty) {
+        headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
+      }
 
-    final headers = <String, String>{'Content-Type': 'application/json'};
-    if (AppConstants.tronGridApiKey.isNotEmpty) {
-      headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
-    }
+      final response = await _httpClient.get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 10));
 
-    final response = await _httpClient.get(Uri.parse(url), headers: headers)
-        .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
+        if (data['data'] != null) {
+          final txList = data['data'] as List;
+          final transactions = <Transaction>[];
 
-      if (data['data'] != null) {
-        final txList = data['data'] as List;
-        print('📦 Received ${txList.length} total transactions from TronGrid');
+          for (var tx in txList) {
+            try {
+              final rawData = tx['raw_data'] ?? {};
+              final contracts = rawData['contract'] as List? ?? [];
 
-        final transactions = <Transaction>[];
-        int skipped = 0;
+              if (contracts.isEmpty) continue;
 
-        for (var tx in txList) {
-          try {
-            // Get contract type
-            final rawData = tx['raw_data'] ?? {};
-            final contracts = rawData['contract'] as List? ?? [];
+              final contract = contracts.first;
+              final contractType = contract['type']?.toString() ?? '';
 
-            if (contracts.isEmpty) {
-              skipped++;
+              if (contractType == 'TransferContract') {
+                final parsedTx = Transaction.fromTronGrid(tx, address);
+                transactions.add(parsedTx);
+              }
+            } catch (e) {
               continue;
             }
-
-            final contract = contracts.first;
-            final contractType = contract['type']?.toString() ?? '';
-
-            print('   Contract type: $contractType');
-
-            // Only process TransferContract (native TRX transfers)
-            if (contractType == 'TransferContract') {
-              final parsedTx = Transaction.fromTronGrid(tx, address);
-              transactions.add(parsedTx);
-            } else {
-              print('   ⏭️  Skipped: $contractType');
-              skipped++;
-            }
-          } catch (e) {
-            print('   ⚠️ Error parsing TRX transaction: $e');
-            skipped++;
-            continue;
           }
+
+          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+          return transactions;
         }
-
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        print('✅ TRX Summary:');
-        print('   Total from API: ${txList.length}');
-        print('   Successfully parsed: ${transactions.length}');
-        print('   Skipped/Failed: $skipped');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-        return transactions;
       }
-    } else {
-      print('⚠️ TronGrid API returned status: ${response.statusCode}');
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      return [];
+    } catch (e) {
+      print('❌ TRX transactions error: $e');
+      return _cache['trx_tx_$address']?.data as List<Transaction>? ?? [];
     }
-
-    return [];
-  } catch (e) {
-    print('❌ TRX transactions error: $e\n');
-    return _cache['trx_tx_$address']?.data as List<Transaction>? ?? [];
   }
-}
 
+  // ============ FIXED TRON SEND TRANSACTION ============
   Future<String> sendTron({
     required String toAddress,
     required String privateKey,
@@ -601,12 +538,11 @@ Future<List<Transaction>> getTronTransactions(String address) async {
       }
 
       final amountSun = (amount * 1000000).toInt();
-
       final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
 
-      // Get account info for from address
+      // Get from address from private key
       final privateKeyBytes = _hexToBytes(privateKey);
-      final fromAddress = await _getTronAddressFromPrivateKey(privateKeyBytes);
+      final fromAddress = _getTronAddressFromPrivateKey(privateKeyBytes);
 
       print('From address: $fromAddress');
       print('To address: $toAddress');
@@ -615,9 +551,10 @@ Future<List<Transaction>> getTronTransactions(String address) async {
       // Create transaction
       final createTxUrl = '$baseUrl/wallet/createtransaction';
       final createTxBody = json.encode({
-        'to_address': _addressToHex(toAddress),
-        'owner_address': _addressToHex(fromAddress),
+        'to_address': toAddress,
+        'owner_address': fromAddress,
         'amount': amountSun,
+        'visible': true,
       });
 
       final headers = <String, String>{'Content-Type': 'application/json'};
@@ -625,11 +562,15 @@ Future<List<Transaction>> getTronTransactions(String address) async {
         headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
       }
 
+      print('Creating transaction...');
       final createResponse = await _httpClient.post(
         Uri.parse(createTxUrl),
         headers: headers,
         body: createTxBody,
       ).timeout(const Duration(seconds: 15));
+
+      print('Create response: ${createResponse.statusCode}');
+      print('Create body: ${createResponse.body}');
 
       if (createResponse.statusCode != 200) {
         throw Exception('Failed to create transaction: ${createResponse.body}');
@@ -637,69 +578,259 @@ Future<List<Transaction>> getTronTransactions(String address) async {
 
       final txData = json.decode(createResponse.body);
 
-      // Sign transaction
-      final signedTx = await _signTronTransaction(txData, privateKeyBytes);
+      if (txData['Error'] != null) {
+        throw Exception('Transaction error: ${txData['Error']}');
+      }
 
-      // Broadcast transaction
+      print('✅ Transaction created, signing...');
+
+      // Sign transaction
+      final signedTx = _signTronTransaction(txData, privateKeyBytes);
+
+      // Broadcast
       final broadcastUrl = '$baseUrl/wallet/broadcasttransaction';
+      print('Broadcasting...');
+
       final broadcastResponse = await _httpClient.post(
         Uri.parse(broadcastUrl),
         headers: headers,
         body: json.encode(signedTx),
       ).timeout(const Duration(seconds: 15));
 
+      print('Broadcast status: ${broadcastResponse.statusCode}');
+      print('Broadcast body: ${broadcastResponse.body}');
+
       if (broadcastResponse.statusCode == 200) {
         final result = json.decode(broadcastResponse.body);
+
         if (result['result'] == true) {
-          final txHash = result['txid'] ?? txData['txID'];
-          print('✅ Tron transaction broadcasted: $txHash');
+          final txHash = result['txid'] ?? signedTx['txID'];
+          print('✅ Transaction sent: $txHash');
           _clearCacheForAddress(fromAddress, CoinType.trx);
           return txHash;
         } else {
-          throw Exception('Broadcast failed: ${result['message'] ?? 'Unknown error'}');
+          final errorMsg = result['message'] ?? result['code'] ?? 'Unknown error';
+          throw Exception('Broadcast failed: $errorMsg');
         }
       }
 
-      throw Exception('Broadcast failed with status: ${broadcastResponse.statusCode}');
+      throw Exception('Broadcast failed: ${broadcastResponse.statusCode}');
     } catch (e) {
+      print('❌ Tron error: $e');
       throw Exception('Failed to send Tron: ${_sanitizeErrorMessage(e.toString())}');
     }
   }
 
-  Future<String> _getTronAddressFromPrivateKey(Uint8List privateKeyBytes) async {
-    // This is a simplified version - in production use proper Tron SDK
-    // For now, we'll derive it from the transaction creation
-    return 'DERIVED_FROM_TX'; // Placeholder
-  }
-
-  String _addressToHex(String base58Address) {
-    // Simple base58 decode - in production use proper library
+  // ============ TRON HELPER METHODS ============
+  String _getTronAddressFromPrivateKey(Uint8List privateKeyBytes) {
     try {
-      final decoded = _base58Decode(base58Address);
-      return decoded.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
+      final secp256k1 = ECCurve_secp256k1();
+      final G = secp256k1.G;
+
+      final privateKeyBigInt = _bytesToBigInt(privateKeyBytes);
+      final publicKeyPoint = (G * privateKeyBigInt)!;
+
+      final publicKeyBytes = publicKeyPoint.getEncoded(false);
+      final keyBytes = publicKeyBytes.sublist(1);
+
+      final hash = SHA256Digest().process(keyBytes);
+      final addressBytes = hash.sublist(hash.length - 20);
+      final addressWithPrefix = Uint8List.fromList([0x41, ...addressBytes]);
+
+      final address = bs58.encode(addressWithPrefix);
+      print('✅ Derived address: $address');
+      return address;
     } catch (e) {
-      return base58Address;
+      print('❌ Error deriving address: $e');
+      throw Exception('Failed to derive Tron address');
     }
   }
 
-  List<int> _base58Decode(String input) {
-    // Simplified - use bs58 package in production
-    return [];
+  Map<String, dynamic> _signTronTransaction(Map<String, dynamic> txData, Uint8List privateKey) {
+    try {
+      final rawDataHex = txData['raw_data_hex'] as String?;
+      if (rawDataHex == null || rawDataHex.isEmpty) {
+        throw Exception('No raw_data_hex');
+      }
+
+      final txBytes = _hexToBytes(rawDataHex);
+      final hash = SHA256Digest().process(txBytes);
+      final signature = _ecdsaSign(hash, privateKey);
+
+      final signedTx = Map<String, dynamic>.from(txData);
+      signedTx['signature'] = [_bytesToHex(signature)];
+
+      return signedTx;
+    } catch (e) {
+      print('❌ Signing error: $e');
+      throw Exception('Failed to sign: $e');
+    }
+  }
+
+  Uint8List _ecdsaSign(Uint8List messageHash, Uint8List privateKey) {
+    try {
+      final secp256k1 = ECCurve_secp256k1();
+      final n = secp256k1.n;
+      final G = secp256k1.G;
+
+      final signer = ECDSASigner(null, HMac(SHA256Digest(), 64));
+      final privateKeyBigInt = _bytesToBigInt(privateKey);
+      final domainParams = ECDomainParameters('secp256k1');
+      final privKey = ECPrivateKey(privateKeyBigInt, domainParams);
+
+      signer.init(true, PrivateKeyParameter(privKey));
+      final sig = signer.generateSignature(messageHash) as ECSignature;
+
+      final rBytes = _bigIntToBytes(sig.r, 32);
+      final sBytes = _bigIntToBytes(sig.s, 32);
+
+      // Calculate recovery ID
+      int v = 0;
+      final publicKeyPoint = (G * privateKeyBigInt)!;
+
+      for (int i = 0; i < 4; i++) {
+        try {
+          final recovered = _recoverPublicKey(messageHash, sig.r, sig.s, i, secp256k1);
+          if (recovered != null &&
+              _bytesToHex(recovered.getEncoded(false)) == _bytesToHex(publicKeyPoint.getEncoded(false))) {
+            v = i;
+            break;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+
+      return Uint8List.fromList([...rBytes, ...sBytes, v]);
+    } catch (e) {
+      print('❌ ECDSA error: $e');
+      throw Exception('ECDSA failed: $e');
+    }
+  }
+
+  ECPoint? _recoverPublicKey(Uint8List hash, BigInt r, BigInt s, int recoveryId, ECCurve_secp256k1 params) {
+    try {
+      final n = params.n;
+      final G = params.G;
+
+      final i = BigInt.from(recoveryId ~/ 2);
+      final x = r + (i * n);
+
+      // Get the prime from secp256k1
+      final prime = BigInt.parse(
+          'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F',
+          radix: 16
+      );
+
+      if (x.compareTo(prime) >= 0) return null;
+
+      // Decompress point
+      final yTilde = recoveryId & 1;
+      final R = _decompressPoint(x, yTilde == 1, prime);
+      if (R == null) return null;
+
+      // Check if R * n is infinity
+      final nR = R * n;
+      if (nR == null || !nR.isInfinity) return null;
+
+      final e = _bytesToBigInt(hash);
+      final eInv = (-e) % n;
+      final rInv = r.modInverse(n);
+      final srInv = (rInv * s) % n;
+      final eInvrInv = (rInv * eInv) % n;
+
+      final q = (G * eInvrInv)! + (R * srInv)!;
+      return q;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  ECPoint? _decompressPoint(BigInt x, bool yBit, BigInt prime) {
+    try {
+      final secp256k1 = ECCurve_secp256k1();
+
+      // y^2 = x^3 + 7 (mod p) for secp256k1
+      final a = BigInt.from(0);
+      final b = BigInt.from(7);
+
+      final x3 = (x * x * x) % prime;
+      final ax = (a * x) % prime;
+      final ySquared = (x3 + ax + b) % prime;
+
+      // Calculate y using modular square root
+      var y = _modSqrt(ySquared, prime);
+      if (y == null) return null;
+
+      // Check if y matches the desired bit
+      final yIsOdd = (y & BigInt.one) == BigInt.one;
+      if (yIsOdd != yBit) {
+        y = prime - y;
+      }
+
+      // Create the point
+      return secp256k1.curve.createPoint(x, y);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Modular square root using Tonelli-Shanks algorithm
+  BigInt? _modSqrt(BigInt a, BigInt p) {
+    if (a == BigInt.zero) return BigInt.zero;
+    if (p == BigInt.two) return a;
+
+    // Check if a is a quadratic residue
+    if (a.modPow((p - BigInt.one) ~/ BigInt.two, p) != BigInt.one) {
+      return null;
+    }
+
+    // For secp256k1, p ≡ 3 (mod 4), so we can use the simple formula
+    if ((p % BigInt.from(4)) == BigInt.from(3)) {
+      return a.modPow((p + BigInt.one) ~/ BigInt.from(4), p);
+    }
+
+    // General Tonelli-Shanks algorithm (not needed for secp256k1)
+    return null;
+  }
+
+  // ============ UTILITY METHODS ============
+  BigInt _bytesToBigInt(Uint8List bytes) {
+    BigInt result = BigInt.zero;
+    for (int i = 0; i < bytes.length; i++) {
+      result = (result << 8) | BigInt.from(bytes[i]);
+    }
+    return result;
+  }
+
+  Uint8List _bigIntToBytes(BigInt number, int length) {
+    final bytes = <int>[];
+    var num = number;
+
+    while (num > BigInt.zero) {
+      bytes.insert(0, (num & BigInt.from(0xff)).toInt());
+      num = num >> 8;
+    }
+
+    while (bytes.length < length) {
+      bytes.insert(0, 0);
+    }
+
+    return Uint8List.fromList(bytes);
   }
 
   Uint8List _hexToBytes(String hex) {
     if (hex.startsWith('0x')) hex = hex.substring(2);
     return Uint8List.fromList(
-        List.generate(hex.length ~/ 2, (i) => int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16))
+        List.generate(hex.length ~/ 2, (i) =>
+            int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16))
     );
   }
 
-  Future<Map<String, dynamic>> _signTronTransaction(Map<String, dynamic> txData, Uint8List privateKey) async {
-    // Simplified signing - use tronweb or tron_dart in production
-    return txData;
+  String _bytesToHex(Uint8List bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
   }
 
-  // HELPERS
   Future<http.Response?> _makeHttpRequest(String url, {int attempt = 1}) async {
     try {
       final response = await _httpClient.get(Uri.parse(url))
