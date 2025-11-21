@@ -31,7 +31,7 @@ class WalletProvider with ChangeNotifier {
   Map<String, List<PortfolioDataPoint>> _walletPortfolioHistory = {};
 
   Timer? _autoRefreshTimer;
-  static const Duration _refreshInterval = Duration(minutes: 5);
+  static const Duration _refreshInterval = Duration(minutes: 3);
 
   WalletData? get wallet => _wallet;
   bool get isMainnet => _isMainnet;
@@ -243,6 +243,12 @@ class WalletProvider with ChangeNotifier {
 
     await _loadCurrentWallet();
 
+    // Clear old data
+    _balances.clear();
+    _transactions.clear();
+    notifyListeners();
+
+    // Quick refresh
     Future.microtask(() async {
       try {
         await refreshBalances();
@@ -252,8 +258,6 @@ class WalletProvider with ChangeNotifier {
         print('❌ Error: $e');
       }
     });
-
-    notifyListeners();
   }
 
   Future<void> deleteWalletById(String walletId) async {
@@ -432,10 +436,10 @@ class WalletProvider with ChangeNotifier {
       final prices = await _priceService.fetchAllPrices();
 
       final btcBalance = await _blockchainService.getBitcoinBalance(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       final ethBalance = await _blockchainService.getEthereumBalance(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       final trxBalance = await _blockchainService.getTronBalance(_wallet!.trxAddress);
 
@@ -481,10 +485,10 @@ class WalletProvider with ChangeNotifier {
 
     try {
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 200));
 
       final trxTxs = await _blockchainService.getTronTransactions(_wallet!.trxAddress);
 
@@ -565,7 +569,7 @@ class WalletProvider with ChangeNotifier {
         txHash: txHash,
       );
 
-      Future.delayed(const Duration(seconds: 3), () async {
+      Future.delayed(const Duration(seconds: 2), () async {
         await refreshBalances();
         await refreshTransactions();
       });

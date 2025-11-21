@@ -18,14 +18,14 @@ class BlockchainService {
   DateTime? _lastBtcApiCall;
   DateTime? _lastEthApiCall;
   DateTime? _lastTrxApiCall;
-  Duration _apiCallDelay = const Duration(milliseconds: 500);
+  Duration _apiCallDelay = const Duration(milliseconds: 300);
   static const int _maxRetries = 3;
 
   // Enhanced caching
   final Map<String, _CachedData> _cache = {};
-  static const Duration _balanceCacheTTL = Duration(minutes: 2);
-  static const Duration _txCacheTTL = Duration(minutes: 3);
-  static const Duration _feeCacheTTL = Duration(minutes: 1);
+  static const Duration _balanceCacheTTL = Duration(minutes: 1);
+  static const Duration _txCacheTTL = Duration(minutes: 2);
+  static const Duration _feeCacheTTL = Duration(seconds: 45);
 
   final http.Client _httpClient = http.Client();
 
@@ -41,7 +41,7 @@ class BlockchainService {
     print('🔗 Blockchain service initialized (${isMainnet ? "Mainnet" : "Testnet"})');
   }
 
-  // BITCOIN
+  // BITCOIN - Using Mempool.space for testnet4 and mainnet
   Future<double> getBitcoinBalance(String address) async {
     try {
       final cacheKey = 'btc_balance_$address';
@@ -52,9 +52,10 @@ class BlockchainService {
       await _respectRateLimit(_lastBtcApiCall);
       _lastBtcApiCall = DateTime.now();
 
+      // Use mempool.space API - better for testnet4
       final url = _isMainnet
-          ? '${AppConstants.btcMainnetApi}/address/$address'
-          : '${AppConstants.btcTestnetApi}/address/$address';
+          ? 'https://mempool.space/api/address/$address'
+          : 'https://mempool.space/testnet4/api/address/$address';
 
       final response = await _makeHttpRequest(url);
 
@@ -90,8 +91,8 @@ class BlockchainService {
       _lastBtcApiCall = DateTime.now();
 
       final url = _isMainnet
-          ? '${AppConstants.btcMainnetApi}/address/$address/txs'
-          : '${AppConstants.btcTestnetApi}/address/$address/txs';
+          ? 'https://mempool.space/api/address/$address/txs'
+          : 'https://mempool.space/testnet4/api/address/$address/txs';
 
       final response = await _makeHttpRequest(url);
 
@@ -177,8 +178,8 @@ class BlockchainService {
 
   Future<List<UtxoWithAddress>> _getBitcoinUtxos(String address, String privateKeyHex) async {
     final url = _isMainnet
-        ? '${AppConstants.btcMainnetApi}/address/$address/utxo'
-        : '${AppConstants.btcTestnetApi}/address/$address/utxo';
+        ? 'https://mempool.space/api/address/$address/utxo'
+        : 'https://mempool.space/testnet4/api/address/$address/utxo';
 
     final response = await _makeHttpRequest(url);
 
@@ -211,8 +212,8 @@ class BlockchainService {
 
   Future<String> _broadcastBitcoinTransaction(String txHex) async {
     final url = _isMainnet
-        ? '${AppConstants.btcMainnetApi}/tx'
-        : '${AppConstants.btcTestnetApi}/tx';
+        ? 'https://mempool.space/api/tx'
+        : 'https://mempool.space/testnet4/api/tx';
 
     final response = await _httpClient.post(
       Uri.parse(url),
@@ -230,6 +231,7 @@ class BlockchainService {
     if (_isMainnet) {
       return address.startsWith('1') || address.startsWith('3') || address.startsWith('bc1');
     } else {
+      // Testnet4 addresses
       return address.startsWith('m') || address.startsWith('n') ||
           address.startsWith('2') || address.startsWith('tb1');
     }
@@ -531,7 +533,7 @@ class BlockchainService {
   Future<http.Response?> _makeHttpRequest(String url, {int attempt = 1}) async {
     try {
       final response = await _httpClient.get(Uri.parse(url))
-          .timeout(Duration(seconds: 10 + (attempt * 5)));
+          .timeout(Duration(seconds: 8 + (attempt * 2)));
 
       if (response.statusCode == 429 && attempt <= _maxRetries) {
         await Future.delayed(Duration(seconds: attempt * 2));

@@ -776,7 +776,7 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
-  // FIXED: Wallet creation with proper loading handling
+  // FIXED: Wallet creation with proper context handling
   void _showCreateWalletDialog(BuildContext context, WalletProvider walletProvider) {
     final controller = TextEditingController(text: 'Wallet ${walletProvider.allWallets.length + 1}');
 
@@ -807,10 +807,16 @@ class _WalletMenuSheet extends StatelessWidget {
                 return;
               }
 
-              // Close the name dialog first
+              // Close this dialog FIRST
               Navigator.pop(dialogContext);
 
-              // Show loading dialog
+              // Small delay to ensure dialog is closed
+              await Future.delayed(const Duration(milliseconds: 100));
+
+              // Check if context is still valid
+              if (!context.mounted) return;
+
+              // NOW show loading dialog using the ORIGINAL context
               showDialog(
                 context: context,
                 barrierDismissible: false,
@@ -841,8 +847,12 @@ class _WalletMenuSheet extends StatelessWidget {
                   // Close loading dialog
                   Navigator.pop(context);
 
-                  // Show seed phrase dialog
-                  _showSeedPhraseDialog(context, mnemonic);
+                  // Small delay before showing seed phrase
+                  await Future.delayed(const Duration(milliseconds: 100));
+
+                  if (context.mounted) {
+                    _showSeedPhraseDialog(context, mnemonic);
+                  }
                 }
               } catch (e) {
                 if (context.mounted) {
@@ -869,7 +879,7 @@ class _WalletMenuSheet extends StatelessWidget {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Import Wallet'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -894,7 +904,7 @@ class _WalletMenuSheet extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -909,12 +919,31 @@ class _WalletMenuSheet extends StatelessWidget {
                 return;
               }
 
-              Navigator.pop(context);
+              // Close dialog first
+              Navigator.pop(dialogContext);
+
+              await Future.delayed(const Duration(milliseconds: 100));
+
+              if (!context.mounted) return;
 
               showDialog(
                 context: context,
                 barrierDismissible: false,
-                builder: (context) => const Center(child: CircularProgressIndicator()),
+                builder: (loadingContext) => const Center(
+                  child: Card(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(),
+                          SizedBox(height: 16),
+                          Text('Importing wallet...'),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               );
 
               try {
