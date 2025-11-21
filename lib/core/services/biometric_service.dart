@@ -1,825 +1,367 @@
-import 'package:http/http.dart' as http;
-import 'package:web3dart/web3dart.dart' as web3dart;
-import 'dart:convert';
-import 'dart:async';
-import 'dart:typed_data';
-import '../../models/wallet.dart';
-import '../constants/app_constants.dart';
-import 'package:bitcoin_base/bitcoin_base.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:flutter/services.dart';
 
-class BlockchainService {
-  static final BlockchainService _instance = BlockchainService._internal();
-  factory BlockchainService() => _instance;
-  BlockchainService._internal();
+class BiometricService {
+  static final BiometricService _instance = BiometricService._internal();
+  factory BiometricService() => _instance;
+  BiometricService._internal();
 
-  late web3dart.Web3Client _ethClient;
-  bool _isMainnet = true;
+  final LocalAuthentication _localAuth = LocalAuthentication();
+  bool _isAuthenticating = false;
+  DateTime? _lastAuthAttempt;
+  int _failedAttempts = 0;
+  static const int _maxAttempts = 3;
+  static const Duration _lockoutDuration = Duration(minutes: 1);
 
-  // Optimized rate limiting
-  DateTime? _lastBtcApiCall;
-  DateTime? _lastEthApiCall;
-  DateTime? _lastTrxApiCall;
-  Duration _apiCallDelay = const Duration(milliseconds: 500);
-  static const int _maxRetries = 3;
-
-  // Enhanced caching
-  final Map<String, _CachedData> _cache = {};
-  static const Duration _balanceCacheTTL = Duration(minutes: 2);
-  static const Duration _txCacheTTL = Duration(minutes: 3);
-  static const Duration _feeCacheTTL = Duration(seconds: 45);
-
-  final http.Client _httpClient = http.Client();
-
-  void initialize(bool isMainnet) {
-    _isMainnet = isMainnet;
-    final rpcUrl = isMainnet ? AppConstants.ethMainnetRpc : AppConstants.ethTestnetRpc;
-
-    if (AppConstants.infuraProjectId.isEmpty) {
-      print('⚠️ Warning: Infura Project ID not configured');
-    }
-
-    _ethClient = web3dart.Web3Client(rpcUrl, _httpClient);
-    print('🔗 Blockchain service initialized (${isMainnet ? "Mainnet" : "Testnet"})');
-  }
-
-  // BITCOIN - Using Mempool.space for testnet4 and mainnet
-  Future<double> getBitcoinBalance(String address) async {
+  // Check if biometrics can be used
+  Future<bool> canCheckBiometrics() async {
     try {
-      final cacheKey = 'btc_balance_$address';
-      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
-        return _cache[cacheKey]!.data as double;
-      }
-
-      await _respectRateLimit(_lastBtcApiCall);
-      _lastBtcApiCall = DateTime.now();
-
-      // Use mempool.space API - better for testnet4
-      final url = _isMainnet
-          ? 'https://mempool.space/api/address/$address'
-          : 'https://mempool.space/testnet4/api/address/$address';
-
-      final response = await _makeHttpRequest(url);
-
-      if (response != null && response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final chainStats = data['chain_stats'] ?? {};
-        final mempoolStats = data['mempool_stats'] ?? {};
-
-        final totalFunded = (chainStats['funded_txo_sum'] ?? 0) + (mempoolStats['funded_txo_sum'] ?? 0);
-        final totalSpent = (chainStats['spent_txo_sum'] ?? 0) + (mempoolStats['spent_txo_sum'] ?? 0);
-        final balance = (totalFunded - totalSpent) / 100000000.0;
-
-        _cache[cacheKey] = _CachedData(balance, DateTime.now());
-        print('✅ BTC Balance: $balance');
-        return balance;
-      }
-
-      return _cache[cacheKey]?.data as double? ?? 0.0;
-    } catch (e) {
-      print('❌ BTC balance error: $e');
-      return _cache['btc_balance_$address']?.data as double? ?? 0.0;
+      return await _localAuth.canCheckBiometrics;
+    } on PlatformException catch (e) {
+      print('❌ canCheckBiometrics error: $e');
+      return false;
     }
   }
 
-  Future<List<Transaction>> getBitcoinTransactions(String address) async {
+  // Check if device supports biometrics
+  Future<bool> isDeviceSupported() async {
     try {
-      final cacheKey = 'btc_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
-
-      await _respectRateLimit(_lastBtcApiCall);
-      _lastBtcApiCall = DateTime.now();
-
-      final url = _isMainnet
-          ? 'https://mempool.space/api/address/$address/txs'
-          : 'https://mempool.space/testnet4/api/address/$address/txs';
-
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      print('🔍 BITCOIN Transaction Fetch');
-      print('   My Address: $address');
-      print('   Network: ${_isMainnet ? "MAINNET" : "TESTNET4"}');
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-      final response = await _makeHttpRequest(url);
-
-      if (response != null && response.statusCode == 200) {
-        final txs = json.decode(response.body) as List;
-        print('📦 Received ${txs.length} BTC transactions from API');
-
-        final transactions = txs.take(20).map((tx) {
-          try {
-            return Transaction.fromBlockstreamBitcoin(tx, address);
-          } catch (e) {
-            print('   ⚠️ Error parsing BTC tx: $e');
-            return null;
-          }
-        }).whereType<Transaction>().toList();
-
-        print('✅ Successfully parsed ${transactions.length} BTC transactions');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-        return transactions;
-      }
-
-      return _cache[cacheKey]?.data as List<Transaction>? ?? [];
-    } catch (e) {
-      print('❌ BTC transactions error: $e\n');
-      return _cache['btc_tx_$address']?.data as List<Transaction>? ?? [];
+      return await _localAuth.isDeviceSupported();
+    } on PlatformException catch (e) {
+      print('❌ isDeviceSupported error: $e');
+      return false;
     }
   }
 
-  Future<String> sendBitcoin({
-    required String fromAddress,
-    required String toAddress,
-    required String privateKeyHex,
-    required double amount,
-    required double feeRate,
+  // Get available biometric types
+  Future<List<BiometricType>> getAvailableBiometrics() async {
+    try {
+      final biometrics = await _localAuth.getAvailableBiometrics();
+      print('📱 Available biometrics: $biometrics');
+      return biometrics;
+    } on PlatformException catch (e) {
+      print('❌ getAvailableBiometrics error: $e');
+      return <BiometricType>[];
+    }
+  }
+
+  // Check if currently locked out
+  bool _isLockedOut() {
+    if (_lastAuthAttempt == null) return false;
+    if (_failedAttempts < _maxAttempts) return false;
+
+    final timeSinceLastAttempt = DateTime.now().difference(_lastAuthAttempt!);
+    if (timeSinceLastAttempt < _lockoutDuration) {
+      print('🔒 Biometric locked out for ${_lockoutDuration.inSeconds - timeSinceLastAttempt.inSeconds} seconds');
+      return true;
+    }
+
+    // Reset after lockout period
+    _failedAttempts = 0;
+    return false;
+  }
+
+  // Main authentication method with enhanced error handling
+  Future<BiometricAuthResult> authenticate({
+    String reason = 'Please authenticate to access your wallet',
+    bool stickyAuth = true,
   }) async {
-    try {
-      print('📤 Preparing Bitcoin transaction...');
-      print('📤 From: $fromAddress');
-      print('📤 To: $toAddress');
-      print('📤 Amount: $amount BTC');
-
-      if (!_validateBitcoinAddress(toAddress)) {
-        throw Exception('Invalid recipient Bitcoin address');
-      }
-
-      final utxos = await _getBitcoinUtxos(fromAddress, privateKeyHex);
-      if (utxos.isEmpty) {
-        throw Exception('No UTXOs available. Make sure your wallet has confirmed funds.');
-      }
-
-      print('📤 Found ${utxos.length} UTXOs');
-
-      final amountSatoshis = (amount * 100000000).toInt();
-      final totalAvailable = utxos.fold<BigInt>(BigInt.zero, (sum, utxo) => sum + utxo.utxo.value);
-
-      print('📤 Total available: ${totalAvailable.toInt() / 100000000} BTC');
-
-      if (totalAvailable < BigInt.from(amountSatoshis)) {
-        throw Exception('Insufficient funds. Available: ${totalAvailable.toInt() / 100000000} BTC');
-      }
-
-      final privateKey = ECPrivate.fromHex(privateKeyHex);
-      final network = _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet;
-      final feeSatoshis = (feeRate * 250).toInt();
-
-      print('📤 Building transaction...');
-
-      final txb = BitcoinTransactionBuilder(
-        utxos: utxos,
-        outPuts: [
-          BitcoinOutput(
-            address: P2pkhAddress.fromAddress(address: toAddress, network: network),
-            value: BigInt.from(amountSatoshis),
-          ),
-        ],
-        fee: BigInt.from(feeSatoshis),
-        network: network,
-        enableRBF: true,
+    // Check for ongoing authentication
+    if (_isAuthenticating) {
+      print('⚠️ Authentication already in progress');
+      return BiometricAuthResult(
+        success: false,
+        error: BiometricError.authInProgress,
+        message: 'Authentication already in progress',
       );
-
-      final transaction = txb.buildTransaction((trDigest, utxo, publicKey, sighash) {
-        return privateKey.signInput(trDigest, sigHash: sighash);
-      });
-
-      final txHex = transaction.serialize();
-      print('📤 Broadcasting transaction...');
-      final txHash = await _broadcastBitcoinTransaction(txHex);
-
-      print('✅ Transaction broadcasted: $txHash');
-      _clearCacheForAddress(fromAddress, CoinType.btc);
-      return txHash;
-    } catch (e) {
-      print('❌ Bitcoin send error: $e');
-      throw Exception('Failed to send Bitcoin: ${_sanitizeErrorMessage(e.toString())}');
     }
-  }
 
-  Future<List<UtxoWithAddress>> _getBitcoinUtxos(String address, String privateKeyHex) async {
-    final url = _isMainnet
-        ? 'https://mempool.space/api/address/$address/utxo'
-        : 'https://mempool.space/testnet4/api/address/$address/utxo';
+    // Check for lockout
+    if (_isLockedOut()) {
+      final remainingTime = _lockoutDuration - DateTime.now().difference(_lastAuthAttempt!);
+      return BiometricAuthResult(
+        success: false,
+        error: BiometricError.lockedOut,
+        message: 'Too many failed attempts. Try again in ${remainingTime.inSeconds} seconds',
+      );
+    }
 
-    final response = await _makeHttpRequest(url);
+    try {
+      _isAuthenticating = true;
+      _lastAuthAttempt = DateTime.now();
+      print('🔐 Starting biometric authentication...');
 
-    if (response != null && response.statusCode == 200) {
-      final utxos = json.decode(response.body) as List;
-      if (utxos.isEmpty) return [];
-
-      final privateKey = ECPrivate.fromHex(privateKeyHex);
-      final publicKey = privateKey.getPublic();
-      final network = _isMainnet ? BitcoinNetwork.mainnet : BitcoinNetwork.testnet;
-      final p2pkhAddress = P2pkhAddress.fromAddress(address: address, network: network);
-
-      return utxos.map((u) {
-        return UtxoWithAddress(
-          utxo: BitcoinUtxo(
-            txHash: u['txid'],
-            value: BigInt.from(u['value'] ?? 0),
-            vout: u['vout'] ?? 0,
-            scriptType: p2pkhAddress.type,
-          ),
-          ownerDetails: UtxoAddressDetails(
-            publicKey: publicKey.toHex(),
-            address: p2pkhAddress,
-          ),
+      // Check if biometrics are available
+      final canAuthenticate = await canCheckBiometrics() || await isDeviceSupported();
+      if (!canAuthenticate) {
+        print('⚠️ Device cannot authenticate');
+        return BiometricAuthResult(
+          success: false,
+          error: BiometricError.notAvailable,
+          message: 'Biometric authentication not available',
         );
-      }).toList();
-    }
-    return [];
-  }
-
-  Future<String> _broadcastBitcoinTransaction(String txHex) async {
-    final url = _isMainnet
-        ? 'https://mempool.space/api/tx'
-        : 'https://mempool.space/testnet4/api/tx';
-
-    final response = await _httpClient.post(
-      Uri.parse(url),
-      headers: {'Content-Type': 'text/plain'},
-      body: txHex,
-    ).timeout(const Duration(seconds: 30));
-
-    if (response.statusCode == 200) {
-      return response.body.trim();
-    }
-    throw Exception('Broadcast failed: ${response.body}');
-  }
-
-  bool _validateBitcoinAddress(String address) {
-    if (_isMainnet) {
-      return address.startsWith('1') || address.startsWith('3') || address.startsWith('bc1');
-    } else {
-      // Testnet4 addresses
-      return address.startsWith('m') || address.startsWith('n') ||
-          address.startsWith('2') || address.startsWith('tb1');
-    }
-  }
-
-  // ETHEREUM
-  Future<double> getEthereumBalance(String address) async {
-    try {
-      final cacheKey = 'eth_balance_$address';
-      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
-        return _cache[cacheKey]!.data as double;
       }
 
-      final ethAddress = web3dart.EthereumAddress.fromHex(address);
-      final balance = await _ethClient.getBalance(ethAddress);
-      final balanceEth = balance.getValueInUnit(web3dart.EtherUnit.ether);
-
-      _cache[cacheKey] = _CachedData(balanceEth, DateTime.now());
-      print('✅ ETH Balance: $balanceEth');
-      return balanceEth;
-    } catch (e) {
-      print('❌ ETH balance error: $e');
-      return _cache['eth_balance_$address']?.data as double? ?? 0.0;
-    }
-  }
-
-  Future<List<Transaction>> getEthereumTransactions(String address) async {
-    try {
-      final cacheKey = 'eth_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
-
-      await _respectRateLimit(_lastEthApiCall);
-      _lastEthApiCall = DateTime.now();
-
-      final apiKey = AppConstants.etherscanApiKey;
-      if (apiKey.isEmpty) {
-        print('⚠️ Etherscan API key not configured');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-        return [];
-      }
-
-      final baseUrl = _isMainnet
-          ? AppConstants.ethMainnetEtherscanV2
-          : AppConstants.ethTestnetEtherscanV2;
-
-      final url = '$baseUrl?module=account&action=txlist'
-          '&address=$address&startblock=0&endblock=99999999'
-          '&page=1&offset=20&sort=desc&apikey=$apiKey';
-
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      print('🔍 ETHEREUM Transaction Fetch');
-      print('   My Address: $address');
-      print('   Network: ${_isMainnet ? "MAINNET" : "SEPOLIA"}');
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-      final response = await _makeHttpRequest(url);
-
-      if (response != null && response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        print('📡 Etherscan Response: ${data['status']} - ${data['message']}');
-
-        // FIXED: Handle "No transactions found" properly
-        if (data['status'] == '0' && data['message'] == 'No transactions found') {
-          print('ℹ️  No transactions found for this address');
-          print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-          return [];
-        }
-
-        if (data['status'] == '1' && data['result'] is List) {
-          final txList = data['result'] as List;
-
-          if (txList.isEmpty) {
-            print('ℹ️  Transaction list is empty');
-            print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-            return [];
-          }
-
-          print('📦 Received ${txList.length} ETH transactions from API');
-
-          final transactions = txList
-              .map((tx) {
-            try {
-              return Transaction.fromEtherscanV2(tx, address);
-            } catch (e) {
-              print('   ⚠️ Error parsing ETH tx: $e');
-              return null;
-            }
-          })
-              .whereType<Transaction>()
-              .toList();
-
-          print('✅ Successfully parsed ${transactions.length} ETH transactions');
-          print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-          return transactions;
-        } else {
-          print('⚠️ API returned error or unexpected format');
-          print('   Status: ${data['status']}');
-          print('   Message: ${data['message']}');
-          print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-        }
-      }
-
-      return [];
-    } catch (e) {
-      print('❌ ETH transactions error: $e\n');
-      return [];
-    }
-  }
-
-  Future<String> sendEthereum({
-    required String toAddress,
-    required String privateKey,
-    required double amount,
-  }) async {
-    try {
-      print('📤 Preparing Ethereum transaction...');
-
-      if (!toAddress.startsWith('0x') || toAddress.length != 42) {
-        throw Exception('Invalid Ethereum address format');
-      }
-
-      final credentials = web3dart.EthPrivateKey.fromHex(privateKey);
-      final sender = await credentials.address;
-      final recipient = web3dart.EthereumAddress.fromHex(toAddress);
-
-      final currentBalance = await getEthereumBalance(sender.hex);
-      if (currentBalance < amount) {
-        throw Exception('Insufficient ETH balance');
-      }
-
-      final amountWei = BigInt.from((amount * 1e18).round());
-      final amountInWei = web3dart.EtherAmount.inWei(amountWei);
-
-      web3dart.EtherAmount gasPrice;
-      try {
-        gasPrice = await _ethClient.getGasPrice();
-      } catch (e) {
-        gasPrice = web3dart.EtherAmount.inWei(BigInt.from(20 * 1e9));
-      }
-
-      BigInt gasLimit = BigInt.from(21000);
-      try {
-        gasLimit = await _ethClient.estimateGas(
-          sender: sender,
-          to: recipient,
-          value: amountInWei,
+      // Check enrolled biometrics
+      final availableBiometrics = await getAvailableBiometrics();
+      if (availableBiometrics.isEmpty) {
+        print('⚠️ No biometrics enrolled');
+        return BiometricAuthResult(
+          success: false,
+          error: BiometricError.notEnrolled,
+          message: 'No biometrics enrolled on device',
         );
-        gasLimit = (gasLimit * BigInt.from(110)) ~/ BigInt.from(100);
-      } catch (e) {
-        print('⚠️ Using default gas limit');
       }
 
-      final totalCost = amountInWei.getInWei + (gasPrice.getInWei * gasLimit);
-      final totalCostEth = web3dart.EtherAmount.inWei(totalCost)
-          .getValueInUnit(web3dart.EtherUnit.ether);
+      print('🔐 Available biometrics: $availableBiometrics');
 
-      if (currentBalance < totalCostEth) {
-        throw Exception('Insufficient balance for transaction + gas');
-      }
-
-      final txData = web3dart.Transaction(
-        to: recipient,
-        value: amountInWei,
-        gasPrice: gasPrice,
-        maxGas: gasLimit.toInt(),
+      // Attempt authentication
+      final result = await _localAuth.authenticate(
+        localizedReason: reason,
+        options: AuthenticationOptions(
+          stickyAuth: stickyAuth,
+          biometricOnly: false, // Allow PIN/pattern fallback
+          useErrorDialogs: true,
+          sensitiveTransaction: true,
+        ),
       );
 
-      final txHash = await _ethClient.sendTransaction(
-        credentials,
-        txData,
-        chainId: _isMainnet ? 1 : 11155111,
-      );
+      print('🔐 Authentication result: $result');
 
-      _clearCacheForAddress(sender.hex, CoinType.eth);
-      return txHash;
-    } catch (e) {
-      throw Exception('Failed to send Ethereum: ${_sanitizeErrorMessage(e.toString())}');
-    }
-  }
-
-  Future<GasFeeEstimate> estimateEthereumGasFee({
-    required String fromAddress,
-    required String toAddress,
-    required double amount,
-  }) async {
-    try {
-      final cacheKey = 'gas_fee_${fromAddress}_${toAddress}_$amount';
-      if (_isCacheValid(cacheKey, _feeCacheTTL)) {
-        return _cache[cacheKey]!.data as GasFeeEstimate;
-      }
-
-      final from = web3dart.EthereumAddress.fromHex(fromAddress);
-      final to = web3dart.EthereumAddress.fromHex(toAddress);
-      final value = web3dart.EtherAmount.inWei(BigInt.from((amount * 1e18).round()));
-
-      web3dart.EtherAmount gasPrice;
-      try {
-        gasPrice = await _ethClient.getGasPrice();
-      } catch (e) {
-        gasPrice = web3dart.EtherAmount.inWei(BigInt.from(20 * 1e9));
-      }
-
-      BigInt gasLimit = BigInt.from(21000);
-      try {
-        gasLimit = await _ethClient.estimateGas(sender: from, to: to, value: value);
-      } catch (e) {
-        print('⚠️ Using default gas limit');
-      }
-
-      final gasFee = gasPrice.getInWei * gasLimit;
-      final gasFeeEth = web3dart.EtherAmount.inWei(gasFee)
-          .getValueInUnit(web3dart.EtherUnit.ether);
-
-      final estimate = GasFeeEstimate(
-        gasLimit: gasLimit.toInt(),
-        gasPrice: gasPrice.getValueInUnit(web3dart.EtherUnit.gwei),
-        totalFee: gasFeeEth,
-      );
-
-      _cache[cacheKey] = _CachedData(estimate, DateTime.now());
-      return estimate;
-    } catch (e) {
-      return GasFeeEstimate(gasLimit: 21000, gasPrice: 20.0, totalFee: 0.00042);
-    }
-  }
-
-  // TRON - IMPLEMENTED
-  Future<double> getTronBalance(String address) async {
-    try {
-      final cacheKey = 'trx_balance_$address';
-      if (_isCacheValid(cacheKey, _balanceCacheTTL)) {
-        return _cache[cacheKey]!.data as double;
-      }
-
-      await _respectRateLimit(_lastTrxApiCall);
-      _lastTrxApiCall = DateTime.now();
-
-      final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
-      final url = '$baseUrl/v1/accounts/$address';
-
-      final headers = <String, String>{'Content-Type': 'application/json'};
-      if (AppConstants.tronGridApiKey.isNotEmpty) {
-        headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
-      }
-
-      final response = await _httpClient.get(Uri.parse(url), headers: headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['data'] != null && (data['data'] as List).isNotEmpty) {
-          final balanceSun = data['data'][0]['balance'] ?? 0;
-          final balance = balanceSun / 1000000.0;
-
-          _cache[cacheKey] = _CachedData(balance, DateTime.now());
-          print('✅ TRX Balance: $balance');
-          return balance;
-        }
-      }
-
-      return 0.0;
-    } catch (e) {
-      print('❌ TRX balance error: $e');
-      return _cache['trx_balance_$address']?.data as double? ?? 0.0;
-    }
-  }
-
-  Future<List<Transaction>> getTronTransactions(String address) async {
-    try {
-      final cacheKey = 'trx_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
-
-      await _respectRateLimit(_lastTrxApiCall);
-      _lastTrxApiCall = DateTime.now();
-
-      final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
-      final url = '$baseUrl/v1/accounts/$address/transactions?limit=20';
-
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      print('🔍 TRON Transaction Fetch');
-      print('   My Address: $address');
-      print('   Network: ${_isMainnet ? "MAINNET" : "SHASTA"}');
-      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-
-      final headers = <String, String>{'Content-Type': 'application/json'};
-      if (AppConstants.tronGridApiKey.isNotEmpty) {
-        headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
-      }
-
-      final response = await _httpClient.get(Uri.parse(url), headers: headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        if (data['data'] != null) {
-          final txList = data['data'] as List;
-          print('📦 Received ${txList.length} total transactions from TronGrid');
-
-          final transactions = <Transaction>[];
-          int skipped = 0;
-
-          for (var tx in txList) {
-            try {
-              // Get contract type
-              final rawData = tx['raw_data'] ?? {};
-              final contracts = rawData['contract'] as List? ?? [];
-
-              if (contracts.isEmpty) {
-                skipped++;
-                continue;
-              }
-
-              final contract = contracts.first;
-              final contractType = contract['type']?.toString() ?? '';
-
-              print('   Contract type: $contractType');
-
-              // Only process TransferContract (native TRX transfers)
-              if (contractType == 'TransferContract') {
-                final parsedTx = Transaction.fromTronGrid(tx, address);
-                transactions.add(parsedTx);
-              } else {
-                print('   ⏭️  Skipped: $contractType');
-                skipped++;
-              }
-            } catch (e) {
-              print('   ⚠️ Error parsing TRX transaction: $e');
-              skipped++;
-              continue;
-            }
-          }
-
-          print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-          print('✅ TRX Summary:');
-          print('   Total from API: ${txList.length}');
-          print('   Successfully parsed: ${transactions.length}');
-          print('   Skipped/Failed: $skipped');
-          print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-
-          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-          return transactions;
-        }
+      if (result) {
+        _failedAttempts = 0;
+        return BiometricAuthResult(
+          success: true,
+          error: BiometricError.none,
+          message: 'Authentication successful',
+        );
       } else {
-        print('⚠️ TronGrid API returned status: ${response.statusCode}');
-        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+        _failedAttempts++;
+        return BiometricAuthResult(
+          success: false,
+          error: BiometricError.failed,
+          message: 'Authentication failed',
+        );
+      }
+    } on PlatformException catch (e) {
+      print('❌ Biometric authentication error: ${e.code}');
+      _failedAttempts++;
+
+      // Map platform errors to BiometricError enum
+      BiometricError error;
+      String message;
+
+      switch (e.code) {
+        case 'no_fragment_activity':
+          error = BiometricError.noFragmentActivity;
+          message = 'Activity configuration error. Please contact support.';
+          break;
+        case 'NotAvailable':
+          error = BiometricError.notAvailable;
+          message = 'Biometric authentication not available';
+          break;
+        case 'NotEnrolled':
+          error = BiometricError.notEnrolled;
+          message = 'No biometrics enrolled. Please set up biometrics in device settings.';
+          break;
+        case 'PasscodeNotSet':
+          error = BiometricError.passcodeNotSet;
+          message = 'Device passcode not set. Please set up a passcode first.';
+          break;
+        case 'LockedOut':
+          error = BiometricError.lockedOut;
+          message = 'Biometric locked due to too many failed attempts';
+          break;
+        case 'PermanentlyLockedOut':
+          error = BiometricError.permanentlyLockedOut;
+          message = 'Biometric permanently locked. Use passcode to unlock.';
+          break;
+        case 'UserCancel':
+          error = BiometricError.userCanceled;
+          message = 'Authentication cancelled by user';
+          _failedAttempts--; // Don't count cancellation as failed attempt
+          break;
+        case 'auth_in_progress':
+          error = BiometricError.authInProgress;
+          message = 'Another authentication in progress';
+          _failedAttempts--;
+          break;
+        default:
+          error = BiometricError.unknown;
+          message = e.message ?? 'Unknown error occurred';
       }
 
-      return [];
+      return BiometricAuthResult(
+        success: false,
+        error: error,
+        message: message,
+        platformError: e.code,
+      );
     } catch (e) {
-      print('❌ TRX transactions error: $e\n');
-      return _cache['trx_tx_$address']?.data as List<Transaction>? ?? [];
+      print('❌ Unexpected biometric error: $e');
+      _failedAttempts++;
+      return BiometricAuthResult(
+        success: false,
+        error: BiometricError.unknown,
+        message: 'Unexpected error occurred',
+      );
+    } finally {
+      _isAuthenticating = false;
     }
   }
 
-  // FIXED: Tron send with proper from address parameter
-  Future<String> sendTron({
-    required String fromAddress,
-    required String toAddress,
-    required String privateKey,
-    required double amount,
-  }) async {
+  // Stop ongoing authentication
+  Future<void> stopAuthentication() async {
     try {
-      print('📤 Preparing Tron transaction...');
-      print('📤 From: $fromAddress');
-      print('📤 To: $toAddress');
-      print('📤 Amount: $amount TRX');
-
-      if (!toAddress.startsWith('T') || toAddress.length < 30) {
-        throw Exception('Invalid recipient Tron address format');
-      }
-
-      if (!fromAddress.startsWith('T') || fromAddress.length < 30) {
-        throw Exception('Invalid sender Tron address format');
-      }
-
-      final amountSun = (amount * 1000000).toInt();
-      final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
-
-      print('📤 Creating transaction ($amountSun SUN)...');
-
-      // Create transaction
-      final createTxUrl = '$baseUrl/wallet/createtransaction';
-      final createTxBody = json.encode({
-        'to_address': _addressToHex(toAddress),
-        'owner_address': _addressToHex(fromAddress),
-        'amount': amountSun,
-        'visible': true,
-      });
-
-      final headers = <String, String>{'Content-Type': 'application/json'};
-      if (AppConstants.tronGridApiKey.isNotEmpty) {
-        headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
-      }
-
-      final createResponse = await _httpClient.post(
-        Uri.parse(createTxUrl),
-        headers: headers,
-        body: createTxBody,
-      ).timeout(const Duration(seconds: 15));
-
-      if (createResponse.statusCode != 200) {
-        final errorData = json.decode(createResponse.body);
-        throw Exception('Failed to create transaction: ${errorData['Error'] ?? createResponse.body}');
-      }
-
-      final txData = json.decode(createResponse.body);
-
-      if (txData.containsKey('Error')) {
-        throw Exception('TronGrid error: ${txData['Error']}');
-      }
-
-      print('📤 Signing transaction...');
-
-      // Sign transaction using tron signing
-      final signedTx = await _signTronTransaction(txData, privateKey);
-
-      // Broadcast transaction
-      print('📤 Broadcasting transaction...');
-      final broadcastUrl = '$baseUrl/wallet/broadcasttransaction';
-      final broadcastResponse = await _httpClient.post(
-        Uri.parse(broadcastUrl),
-        headers: headers,
-        body: json.encode(signedTx),
-      ).timeout(const Duration(seconds: 15));
-
-      if (broadcastResponse.statusCode == 200) {
-        final result = json.decode(broadcastResponse.body);
-        if (result['result'] == true) {
-          final txHash = result['txid'] ?? txData['txID'];
-          print('✅ Tron transaction broadcasted: $txHash');
-          _clearCacheForAddress(fromAddress, CoinType.trx);
-          return txHash;
-        } else {
-          throw Exception('Broadcast failed: ${result['message'] ?? result['code'] ?? 'Unknown error'}');
-        }
-      }
-
-      throw Exception('Broadcast failed with status: ${broadcastResponse.statusCode}');
-    } catch (e) {
-      print('❌ Tron send error: $e');
-      throw Exception('Failed to send Tron: ${_sanitizeErrorMessage(e.toString())}');
+      await _localAuth.stopAuthentication();
+      _isAuthenticating = false;
+      print('✅ Authentication stopped');
+    } on PlatformException catch (e) {
+      print('⚠️ Stop authentication error: $e');
     }
   }
 
-  String _addressToHex(String base58Address) {
+  // Get biometric type as user-friendly string
+  Future<String> getBiometricTypeString() async {
     try {
-      // For addresses already in hex format
-      if (base58Address.startsWith('41') && base58Address.length == 42) {
-        return base58Address;
+      final biometrics = await getAvailableBiometrics();
+
+      if (biometrics.contains(BiometricType.face)) {
+        return 'Face ID';
+      } else if (biometrics.contains(BiometricType.fingerprint)) {
+        return 'Fingerprint';
+      } else if (biometrics.contains(BiometricType.iris)) {
+        return 'Iris Scan';
+      } else if (biometrics.contains(BiometricType.strong)) {
+        return 'Biometric Authentication';
+      } else if (biometrics.contains(BiometricType.weak)) {
+        return 'Device Credentials';
       }
 
-      // Use bs58check to decode
-      final decoded = _base58Decode(base58Address);
-      return decoded.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
+      return 'Biometric Authentication';
     } catch (e) {
-      print('⚠️ Address conversion error: $e');
-      return base58Address;
+      return 'Biometric Authentication';
     }
   }
 
-  List<int> _base58Decode(String input) {
-    // Import bs58check package for proper decoding
+  // Check if biometric hardware exists
+  Future<bool> hasBiometricHardware() async {
     try {
-      final bs58check = require('bs58check');
-      return bs58check.decode(input);
+      final isSupported = await isDeviceSupported();
+      final canCheck = await canCheckBiometrics();
+      return isSupported || canCheck;
     } catch (e) {
-      // Fallback: return empty for now
-      return [];
+      return false;
     }
   }
 
-  Uint8List _hexToBytes(String hex) {
-    if (hex.startsWith('0x')) hex = hex.substring(2);
-    return Uint8List.fromList(
-        List.generate(hex.length ~/ 2, (i) => int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16))
-    );
-  }
-
-  Future<Map<String, dynamic>> _signTronTransaction(Map<String, dynamic> txData, String privateKeyHex) async {
-    // Simplified signing - in production, use proper tronweb or on3dart library
-    // For now, just add the raw_data_hex and signature fields
-    txData['signature'] = ['placeholder_signature'];
-    return txData;
-  }
-
-  // HELPERS
-  Future<http.Response?> _makeHttpRequest(String url, {int attempt = 1}) async {
+  // Check if biometrics are enrolled
+  Future<bool> hasBiometricsEnrolled() async {
     try {
-      final response = await _httpClient.get(Uri.parse(url))
-          .timeout(Duration(seconds: 8 + (attempt * 2)));
-
-      if (response.statusCode == 429 && attempt <= _maxRetries) {
-        await Future.delayed(Duration(seconds: attempt * 2));
-        return _makeHttpRequest(url, attempt: attempt + 1);
-      }
-
-      return response;
+      final biometrics = await getAvailableBiometrics();
+      return biometrics.isNotEmpty;
     } catch (e) {
-      if (attempt <= _maxRetries) {
-        await Future.delayed(Duration(seconds: attempt));
-        return _makeHttpRequest(url, attempt: attempt + 1);
-      }
-      return null;
+      return false;
     }
   }
 
-  Future<void> _respectRateLimit(DateTime? lastCall) async {
-    if (lastCall != null) {
-      final timeSince = DateTime.now().difference(lastCall);
-      if (timeSince < _apiCallDelay) {
-        await Future.delayed(_apiCallDelay - timeSince);
-      }
-    }
+  // Reset failed attempts (call after successful PIN entry)
+  void resetFailedAttempts() {
+    _failedAttempts = 0;
+    _lastAuthAttempt = null;
   }
 
-  bool _isCacheValid(String key, Duration maxAge) {
-    final cached = _cache[key];
-    if (cached == null) return false;
-    return DateTime.now().difference(cached.timestamp) < maxAge;
+  // Get remaining lockout time
+  Duration? getRemainingLockoutTime() {
+    if (!_isLockedOut()) return null;
+    if (_lastAuthAttempt == null) return null;
+
+    final elapsed = DateTime.now().difference(_lastAuthAttempt!);
+    final remaining = _lockoutDuration - elapsed;
+
+    return remaining.isNegative ? null : remaining;
   }
 
-  void _clearCacheForAddress(String address, CoinType coinType) {
-    _cache.removeWhere((key, value) =>
-    key.contains(address) && key.startsWith(coinType.name));
-  }
-
-  String _sanitizeErrorMessage(String error) {
-    if (error.contains('private')) return 'Authentication error';
-    if (error.length > 100) return error.substring(0, 100) + '...';
-    return error;
-  }
-
-  void clearCache() {
-    _cache.clear();
-    print('🗑️ Cache cleared');
-  }
-
-  void dispose() {
-    _ethClient.dispose();
-    _httpClient.close();
-  }
+  // Getters
+  bool get isAuthenticating => _isAuthenticating;
+  int get failedAttempts => _failedAttempts;
+  int get maxAttempts => _maxAttempts;
 }
 
-class _CachedData {
-  final dynamic data;
-  final DateTime timestamp;
-  _CachedData(this.data, this.timestamp);
-}
+// Result class for better error handling
+class BiometricAuthResult {
+  final bool success;
+  final BiometricError error;
+  final String message;
+  final String? platformError;
 
-class GasFeeEstimate {
-  final int gasLimit;
-  final double gasPrice;
-  final double totalFee;
-
-  GasFeeEstimate({
-    required this.gasLimit,
-    required this.gasPrice,
-    required this.totalFee,
+  BiometricAuthResult({
+    required this.success,
+    required this.error,
+    required this.message,
+    this.platformError,
   });
+
+  bool get isSuccess => success;
+  bool get isCanceled => error == BiometricError.userCanceled;
+  bool get isLockedOut => error == BiometricError.lockedOut ||
+      error == BiometricError.permanentlyLockedOut;
+  bool get requiresSetup => error == BiometricError.notEnrolled ||
+      error == BiometricError.passcodeNotSet;
+}
+
+// Error types enum
+enum BiometricError {
+  none,
+  notAvailable,
+  notEnrolled,
+  passcodeNotSet,
+  lockedOut,
+  permanentlyLockedOut,
+  userCanceled,
+  failed,
+  authInProgress,
+  noFragmentActivity,
+  unknown,
+}
+
+// Extension for error messages
+extension BiometricErrorExtension on BiometricError {
+  String get userFriendlyMessage {
+    switch (this) {
+      case BiometricError.none:
+        return 'Success';
+      case BiometricError.notAvailable:
+        return 'Biometric authentication is not available on this device';
+      case BiometricError.notEnrolled:
+        return 'Please enroll biometrics in your device settings';
+      case BiometricError.passcodeNotSet:
+        return 'Please set up a device passcode first';
+      case BiometricError.lockedOut:
+        return 'Too many failed attempts. Please try again later';
+      case BiometricError.permanentlyLockedOut:
+        return 'Biometric is locked. Please use your device passcode';
+      case BiometricError.userCanceled:
+        return 'Authentication cancelled';
+      case BiometricError.failed:
+        return 'Authentication failed. Please try again';
+      case BiometricError.authInProgress:
+        return 'Another authentication is in progress';
+      case BiometricError.noFragmentActivity:
+        return 'Configuration error. Please contact support';
+      case BiometricError.unknown:
+        return 'An unknown error occurred';
+    }
+  }
+
+  bool get isRecoverable {
+    switch (this) {
+      case BiometricError.failed:
+      case BiometricError.userCanceled:
+      case BiometricError.authInProgress:
+        return true;
+      default:
+        return false;
+    }
+  }
 }
