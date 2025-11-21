@@ -555,9 +555,7 @@ class WalletProvider with ChangeNotifier {
           );
           break;
         case CoinType.trx:
-        // FIXED: Pass fromAddress to Tron send
           txHash = await _blockchainService.sendTron(
-            fromAddress: _wallet!.trxAddress,
             toAddress: toAddress,
             privateKey: _wallet!.trxPrivateKey,
             amount: amount,
