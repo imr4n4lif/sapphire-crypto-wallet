@@ -11,7 +11,7 @@ import 'receive_screen.dart';
 import 'transaction_detail_screen.dart';
 import '../../widgets/coin_icon.dart';
 
-enum TimelineOption { hour, day, week, month, threeMonths, year }
+enum TimelineOption { day, week, month }
 
 class CoinDetailScreen extends StatefulWidget {
   final CoinType coinType;
@@ -23,7 +23,7 @@ class CoinDetailScreen extends StatefulWidget {
 }
 
 class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerProviderStateMixin {
-  TimelineOption _selectedTimeline = TimelineOption.day;
+  TimelineOption _selectedTimeline = TimelineOption.week;
   List<PricePoint> _priceHistory = [];
   bool _loadingHistory = false;
   late AnimationController _animationController;
@@ -66,15 +66,8 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
     setState(() => _loadingHistory = true);
 
     try {
-      List<PricePoint> history;
-
-      // Special handling for 1 hour timeline
-      if (_selectedTimeline == TimelineOption.hour) {
-        history = await PriceService().fetchHourlyHistory(widget.coinType);
-      } else {
-        final days = _getTimelineDays(_selectedTimeline);
-        history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
-      }
+      final days = _getTimelineDays(_selectedTimeline);
+      final history = await PriceService().fetchPriceHistory(widget.coinType, days: days);
 
       if (mounted && history.isNotEmpty) {
         setState(() {
@@ -100,35 +93,23 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
 
   int _getTimelineDays(TimelineOption timeline) {
     switch (timeline) {
-      case TimelineOption.hour:
-        return 0; // Special case for hourly data
       case TimelineOption.day:
         return 1;
       case TimelineOption.week:
         return 7;
       case TimelineOption.month:
         return 30;
-      case TimelineOption.threeMonths:
-        return 90;
-      case TimelineOption.year:
-        return 365;
     }
   }
 
   String _getTimelineLabel(TimelineOption timeline) {
     switch (timeline) {
-      case TimelineOption.hour:
-        return '1H';
       case TimelineOption.day:
         return '24H';
       case TimelineOption.week:
         return '1W';
       case TimelineOption.month:
         return '1M';
-      case TimelineOption.threeMonths:
-        return '3M';
-      case TimelineOption.year:
-        return '1Y';
     }
   }
 
@@ -307,19 +288,21 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
               ],
             ),
             const SizedBox(height: 16),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: TimelineOption.values.map((option) {
-                  final isSelected = _selectedTimeline == option;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: TimelineOption.values.map((option) {
+                final isSelected = _selectedTimeline == option;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
                     child: ChoiceChip(
-                      label: Text(
-                        _getTimelineLabel(option),
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      label: Center(
+                        child: Text(
+                          _getTimelineLabel(option),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
                         ),
                       ),
                       selected: isSelected,
@@ -331,9 +314,9 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
                         }
                       },
                     ),
-                  );
-                }).toList(),
-              ),
+                  ),
+                );
+              }).toList(),
             ),
             const SizedBox(height: 16),
             AnimatedContainer(
@@ -451,9 +434,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
                       final date = _priceHistory[index].timestamp;
                       String label;
 
-                      if (_selectedTimeline == TimelineOption.hour) {
-                        label = DateFormat('HH:mm').format(date);
-                      } else if (_selectedTimeline == TimelineOption.day) {
+                      if (_selectedTimeline == TimelineOption.day) {
                         label = DateFormat('HH:mm').format(date);
                       } else if (_selectedTimeline == TimelineOption.week) {
                         label = DateFormat('E').format(date);

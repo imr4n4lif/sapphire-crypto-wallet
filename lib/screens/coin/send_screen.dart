@@ -4,6 +4,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../providers/wallet_provider.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/services/blockchain_service.dart';
+import '../../core/services/address_book_service.dart';
+import '../../models/address_book_entry.dart';
 
 class SendScreen extends StatefulWidget {
   final CoinType coinType;
@@ -18,9 +20,16 @@ class _SendScreenState extends State<SendScreen> {
   final _formKey = GlobalKey<FormState>();
   final _addressController = TextEditingController();
   final _amountController = TextEditingController();
+  final AddressBookService _addressBookService = AddressBookService();
   bool _isSending = false;
   bool _isEstimatingFee = false;
   double? _estimatedFee;
+
+  @override
+  void initState() {
+    super.initState();
+    _addressBookService.initialize();
+  }
 
   @override
   void dispose() {
@@ -41,6 +50,43 @@ class _SendScreenState extends State<SendScreen> {
 
     if (result != null) {
       _addressController.text = result;
+      _estimateGasFee();
+    }
+  }
+
+  void _showAddressBook() async {
+    final entries = _addressBookService.getEntriesByCoin(widget.coinType);
+
+    if (entries.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No saved ${_coinInfo.name} addresses'),
+          action: SnackBarAction(
+            label: 'Add',
+            onPressed: () {
+              // Navigate to address book to add
+            },
+          ),
+        ),
+      );
+      return;
+    }
+
+    final selected = await showModalBottomSheet<AddressBookEntry>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _AddressBookBottomSheet(
+        entries: entries,
+        coinInfo: _coinInfo,
+      ),
+    );
+
+    if (selected != null) {
+      setState(() {
+        _addressController.text = selected.address;
+      });
+      _estimateGasFee();
     }
   }
 
@@ -275,15 +321,8 @@ class _SendScreenState extends State<SendScreen> {
                           ),
                           SizedBox(height: 8),
                           Text('• Try a smaller amount'),
-                          Text('• You need ETH for gas fees'),
-                          Text('• Get testnet ETH from:'),
-                          Text(
-                            '  sepoliafaucet.com',
-                            style: TextStyle(
-                              color: Colors.blue,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
+                          Text('• You need enough for network fees'),
+                          Text('• Get testnet coins from faucets'),
                         ],
                       ),
                     ),
@@ -347,9 +386,20 @@ class _SendScreenState extends State<SendScreen> {
                 decoration: InputDecoration(
                   labelText: 'Recipient Address',
                   hintText: 'Enter or scan address',
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.qr_code_scanner),
-                    onPressed: _scanQRCode,
+                  suffixIcon: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.contacts),
+                        onPressed: _showAddressBook,
+                        tooltip: 'Address Book',
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        onPressed: _scanQRCode,
+                        tooltip: 'Scan QR',
+                      ),
+                    ],
                   ),
                 ),
                 onChanged: (_) => _estimateGasFee(),
@@ -494,6 +544,74 @@ class _SendScreenState extends State<SendScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddressBookBottomSheet extends StatelessWidget {
+  final List<AddressBookEntry> entries;
+  final CoinInfo coinInfo;
+
+  const _AddressBookBottomSheet({
+    required this.entries,
+    required this.coinInfo,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Text(
+                    '${coinInfo.name} Addresses',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  return ListTile(
+                    leading: CircleAvatar(
+                      child: Text(entry.name[0].toUpperCase()),
+                    ),
+                    title: Text(entry.name),
+                    subtitle: Text(
+                      '${entry.address.substring(0, 10)}...${entry.address.substring(entry.address.length - 8)}',
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                    ),
+                    onTap: () => Navigator.pop(context, entry),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

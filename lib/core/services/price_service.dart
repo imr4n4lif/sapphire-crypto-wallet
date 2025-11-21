@@ -19,7 +19,7 @@ class PriceService {
 
   // Rate limit tracking
   DateTime? _lastApiCall;
-  static const Duration _minApiDelay = Duration(seconds: 2);
+  static const Duration _minApiDelay = Duration(seconds: 3);
   int _rateLimitHits = 0;
 
   String _getCoinId(CoinType coinType) {
@@ -46,6 +46,7 @@ class PriceService {
   Future<PriceData> fetchPrice(CoinType coinType) async {
     try {
       if (_isCacheFresh(coinType)) {
+        print('✅ Using cached price for ${coinType.name}');
         return _priceCache[coinType]!;
       }
 
@@ -55,6 +56,8 @@ class PriceService {
       final url = '${AppConstants.priceApiUrl}/coins/markets'
           '?vs_currency=usd&ids=$coinId&order=market_cap_desc'
           '&per_page=1&page=1&sparkline=false&price_change_percentage=24h';
+
+      print('🔄 Fetching price for ${coinType.name}...');
 
       final response = await _client.get(Uri.parse(url)).timeout(
         const Duration(seconds: 10),
@@ -66,7 +69,7 @@ class PriceService {
           final priceData = PriceData.fromJson(data[0]);
           _priceCache[coinType] = priceData;
           _lastFetchTime[coinType] = DateTime.now();
-          _rateLimitHits = 0; // Reset on success
+          _rateLimitHits = 0;
 
           print('✅ Fetched ${coinType.name} price: \$${priceData.price}');
           return priceData;
@@ -75,7 +78,6 @@ class PriceService {
         _rateLimitHits++;
         print('⚠️ Rate limit hit for ${coinType.name} (count: $_rateLimitHits)');
 
-        // Use cached data if available
         if (_priceCache.containsKey(coinType)) {
           return _priceCache[coinType]!;
         }
@@ -100,7 +102,7 @@ class PriceService {
       try {
         prices[coinType] = await fetchPrice(coinType);
         // Add delay between requests
-        await Future.delayed(const Duration(milliseconds: 500));
+        await Future.delayed(const Duration(milliseconds: 800));
       } catch (e) {
         print('Error fetching $coinType: $e');
         prices[coinType] = _priceCache[coinType] ??
@@ -119,12 +121,13 @@ class PriceService {
     try {
       final cacheKey = '${coinType.name}_$days';
 
-      // Check cache first - use longer TTL if we're hitting rate limits
+      // Check cache first with longer TTL for rate limit protection
       final cacheTTL = _rateLimitHits > 3
-          ? const Duration(minutes: 10)
-          : const Duration(minutes: 5);
+          ? const Duration(minutes: 15)
+          : const Duration(minutes: 10);
 
       if (_isHistoryCacheFresh(cacheKey, maxAge: cacheTTL)) {
+        print('✅ Using cached history for ${coinType.name} ($days days)');
         return _historyCache[cacheKey]!;
       }
 
@@ -137,27 +140,21 @@ class PriceService {
       await _respectRateLimit();
 
       final coinId = _getCoinId(coinType);
-      String interval;
       int actualDays = days;
 
-      // Optimized intervals
-      if (days == 0) {
+      // Simplify to only supported intervals
+      if (days <= 1) {
         actualDays = 1;
-        interval = 'hourly'; // Changed from minutely to avoid rate limits
-      } else if (days == 1) {
-        interval = 'hourly';
       } else if (days <= 7) {
-        interval = 'hourly';
-      } else if (days <= 90) {
-        interval = 'daily';
+        actualDays = 7;
       } else {
-        interval = 'daily';
+        actualDays = 30;
       }
 
       final url = '${AppConstants.priceApiUrl}/coins/$coinId/market_chart'
-          '?vs_currency=usd&days=$actualDays&interval=$interval&precision=full';
+          '?vs_currency=usd&days=$actualDays&interval=daily';
 
-      print('🔄 Fetching price history: $coinId ($actualDays days, $interval)');
+      print('🔄 Fetching price history: $coinId ($actualDays days)');
 
       final response = await _client.get(Uri.parse(url)).timeout(
         const Duration(seconds: 15),
@@ -179,15 +176,9 @@ class PriceService {
           );
         }).toList();
 
-        // Filter for 1 hour view
-        if (days == 0) {
-          final oneHourAgo = DateTime.now().subtract(const Duration(hours: 1));
-          pricePoints = pricePoints.where((p) => p.timestamp.isAfter(oneHourAgo)).toList();
-        }
-
         // Sample data if too many points
-        if (pricePoints.length > 100) {
-          final step = (pricePoints.length / 100).ceil();
+        if (pricePoints.length > 50) {
+          final step = (pricePoints.length / 50).ceil();
           pricePoints = [
             for (int i = 0; i < pricePoints.length; i += step)
               pricePoints[i]
@@ -196,14 +187,13 @@ class PriceService {
 
         _historyCache[cacheKey] = pricePoints;
         _historyFetchTime[cacheKey] = DateTime.now();
-        _rateLimitHits = 0; // Reset on success
+        _rateLimitHits = 0;
 
         print('✅ Fetched ${pricePoints.length} price points for $coinId');
         return pricePoints;
       } else if (response.statusCode == 429) {
         _rateLimitHits++;
         print('⚠️ Rate limit hit for history (count: $_rateLimitHits)');
-        // Return cached data
         return _historyCache[cacheKey] ?? [];
       }
 
@@ -215,24 +205,20 @@ class PriceService {
     }
   }
 
-  Future<List<PricePoint>> fetchHourlyHistory(CoinType coinType) async {
-    return fetchPriceHistory(coinType, days: 0);
-  }
-
   bool _isCacheFresh(CoinType coinType) {
     if (!_priceCache.containsKey(coinType)) return false;
     if (!_lastFetchTime.containsKey(coinType)) return false;
 
     // Longer cache if hitting rate limits
     final cacheDuration = _rateLimitHits > 3
-        ? const Duration(minutes: 5)
-        : const Duration(minutes: 2);
+        ? const Duration(minutes: 10)
+        : const Duration(minutes: 3);
 
     final age = DateTime.now().difference(_lastFetchTime[coinType]!);
     return age < cacheDuration;
   }
 
-  bool _isHistoryCacheFresh(String cacheKey, {Duration maxAge = const Duration(minutes: 5)}) {
+  bool _isHistoryCacheFresh(String cacheKey, {Duration maxAge = const Duration(minutes: 10)}) {
     if (!_historyCache.containsKey(cacheKey)) return false;
     if (!_historyFetchTime.containsKey(cacheKey)) return false;
 
