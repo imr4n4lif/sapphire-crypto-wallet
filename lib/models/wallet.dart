@@ -1,5 +1,6 @@
 import '../core/constants/app_constants.dart';
-
+import 'dart:typed_data';
+import 'package:bs58check/bs58check.dart' as bs58check;
 class WalletData {
   final String mnemonic;
   final String btcAddress;
@@ -262,7 +263,7 @@ class Transaction {
     }
   }
 
-  // FIXED: Tron transaction parsing with proper hex address handling
+  // FIXED: Tron transaction parsing with PROPER address conversion
   factory Transaction.fromTronGrid(Map<String, dynamic> json, String myAddress) {
     try {
       final txID = json['txID']?.toString() ?? '';
@@ -290,9 +291,8 @@ class Transaction {
       final contractRet = ret['contractRet']?.toString() ?? 'SUCCESS';
       final fee = (ret['fee'] ?? 0) / 1000000.0;
 
-      // CRITICAL FIX: Compare hex addresses
-      // TronGrid uses hex format: 41 + 40 hex chars
-      // Need to convert base58 address to hex for comparison
+      // CRITICAL FIX: Use proper base58 to hex conversion
+      // Import: import '../core/utils/tron_address_converter.dart';
       final myAddressHex = _base58ToHex(myAddress);
 
       print('   My address (hex): $myAddressHex');
@@ -300,12 +300,12 @@ class Transaction {
       // Compare using hex format (case-insensitive)
       final isIncoming = toHex.toLowerCase() == myAddressHex.toLowerCase();
 
-      print('   Is incoming: $isIncoming');
+      print('   Comparison: toHex($toHex) == myHex($myAddressHex)');
       print('   ✅ TRX TX: ${isIncoming ? "INCOMING ✅" : "OUTGOING ❌"} $amount TRX');
 
       // Convert hex addresses to base58 for display
-      String fromDisplay = _hexToBase58Display(fromHex);
-      String toDisplay = _hexToBase58Display(toHex);
+      String fromDisplay = _hexToBase58(fromHex);
+      String toDisplay = _hexToBase58(toHex);
 
       return Transaction(
         hash: txID,
@@ -324,47 +324,45 @@ class Transaction {
       );
     } catch (e) {
       print('❌ Error parsing Tron transaction: $e');
-      print('   Stack trace: ${StackTrace.current}');
       rethrow;
     }
   }
 
-  // Helper: Convert Tron base58 address to hex for comparison
+  // Helper: Convert Tron base58 address to hex using bs58check
   static String _base58ToHex(String base58Address) {
     try {
-      // Tron mainnet addresses start with 'T' (base58)
-      // Tron testnet addresses start with 'T' as well
-      // When converted to hex, they become '41' + 40 hex characters
-
       if (base58Address.startsWith('41')) {
-        return base58Address; // Already in hex format
+        return base58Address.toLowerCase();
       }
 
-      // Simplified conversion using character mapping
-      // This is a workaround - proper implementation needs base58 decode
-      // For the address TFwP2Ee8XgUTEHjPL69W1vAGQ2T4v5pxcB
-      // The hex would be: 414178498c63cd05e5190560e58d4cc00a2da94b33
+      // Use bs58check to decode
+      final decoded = bs58check.decode(base58Address);
+      final hexString = decoded.map((b) => b.toRadixString(16).padLeft(2, '0')).join('');
 
-      // Since we don't have proper base58 decoding, we'll do string matching
-      // This will work as TronGrid should return consistent format
-
-      return base58Address; // Return as-is for now
+      print('   🔄 Converted: $base58Address -> $hexString');
+      return hexString.toLowerCase();
     } catch (e) {
-      print('⚠️ Base58 to Hex conversion error: $e');
-      return base58Address;
+      print('   ⚠️ Base58 decode failed: $e, using fallback');
+      return base58Address.toLowerCase();
     }
   }
 
-  // Helper: Convert hex to base58 for display (simplified)
-  static String _hexToBase58Display(String hexAddress) {
+  // Helper: Convert hex to base58 using bs58check
+  static String _hexToBase58(String hexAddress) {
     try {
-      if (hexAddress.startsWith('41')) {
-        // This would normally use base58 encoding
-        // For now, keep the hex format
+      if (!hexAddress.startsWith('41')) {
         return hexAddress;
       }
-      return hexAddress;
+
+      final bytes = <int>[];
+      for (int i = 0; i < hexAddress.length; i += 2) {
+        bytes.add(int.parse(hexAddress.substring(i, i + 2), radix: 16));
+      }
+
+      final base58 = bs58check.encode(Uint8List.fromList(bytes));
+      return base58;
     } catch (e) {
+      print('   ⚠️ Base58 encode failed: $e');
       return hexAddress;
     }
   }

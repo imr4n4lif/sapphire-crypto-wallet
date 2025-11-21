@@ -42,9 +42,11 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshData();
-      _loadPriceHistory();
-      _animationController.forward();
+      if (mounted) {
+        _refreshData();
+        _loadPriceHistory();
+        _animationController.forward();
+      }
     });
   }
 
@@ -55,15 +57,36 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
   }
 
   Future<void> _refreshData() async {
+    // Check if widget is still mounted before accessing context
     if (!mounted) return;
-    await context.read<WalletProvider>().refreshBalances();
-    await context.read<WalletProvider>().refreshTransactions();
+
+    try {
+      await context.read<WalletProvider>().refreshBalances();
+
+      // Check again after async operation
+      if (!mounted) return;
+
+      await context.read<WalletProvider>().refreshTransactions();
+    } catch (e) {
+      print('❌ Error refreshing data: $e');
+      // Only show error if widget is still mounted
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error refreshing: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadPriceHistory() async {
     if (_loadingHistory || !mounted) return;
 
-    setState(() => _loadingHistory = true);
+    if (mounted) {
+      setState(() => _loadingHistory = true);
+    }
 
     try {
       final days = _getTimelineDays(_selectedTimeline);
@@ -74,7 +97,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
           _priceHistory = history;
           _loadingHistory = false;
         });
-      } else {
+      } else if (mounted) {
         setState(() {
           _priceHistory = [];
           _loadingHistory = false;
@@ -126,8 +149,10 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () async {
-              await _refreshData();
-              await _loadPriceHistory();
+              if (mounted) {
+                await _refreshData();
+                await _loadPriceHistory();
+              }
             },
           ),
         ],
@@ -139,8 +164,10 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
 
           return RefreshIndicator(
             onRefresh: () async {
-              await _refreshData();
-              await _loadPriceHistory();
+              if (mounted) {
+                await _refreshData();
+                await _loadPriceHistory();
+              }
             },
             child: FadeTransition(
               opacity: _fadeAnimation,
@@ -308,7 +335,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
                       selected: isSelected,
                       selectedColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
                       onSelected: (selected) {
-                        if (selected && !_loadingHistory) {
+                        if (selected && !_loadingHistory && mounted) {
                           setState(() => _selectedTimeline = option);
                           _loadPriceHistory();
                         }
@@ -355,7 +382,6 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
     final priceRange = maxPrice - minPrice;
     final buffer = priceRange > 0 ? priceRange * 0.1 : 1.0;
 
-    // Calculate price change
     final firstPrice = _priceHistory.first.price;
     final lastPrice = _priceHistory.last.price;
     final priceChange = lastPrice - firstPrice;
@@ -364,7 +390,6 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
 
     return Column(
       children: [
-        // Price change indicator
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
@@ -461,9 +486,7 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
                   }).toList(),
                   isCurved: true,
                   curveSmoothness: 0.3,
-                  color: isPositive
-                      ? Colors.green
-                      : Colors.red,
+                  color: isPositive ? Colors.green : Colors.red,
                   barWidth: 2,
                   dotData: FlDotData(show: false),
                   belowBarData: BarAreaData(
@@ -515,12 +538,14 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
         Expanded(
           child: ElevatedButton.icon(
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SendScreen(coinType: widget.coinType),
-                ),
-              );
+              if (mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SendScreen(coinType: widget.coinType),
+                  ),
+                );
+              }
             },
             icon: const Icon(Icons.arrow_upward),
             label: const Text('Send'),
@@ -536,12 +561,14 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
         Expanded(
           child: OutlinedButton.icon(
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReceiveScreen(coinType: widget.coinType),
-                ),
-              );
+              if (mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ReceiveScreen(coinType: widget.coinType),
+                  ),
+                );
+              }
             },
             icon: const Icon(Icons.arrow_downward),
             label: const Text('Receive'),
@@ -620,12 +647,14 @@ class _CoinDetailScreenState extends State<CoinDetailScreen> with SingleTickerPr
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => TransactionDetailScreen(transaction: tx),
-            ),
-          );
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => TransactionDetailScreen(transaction: tx),
+              ),
+            );
+          }
         },
         borderRadius: BorderRadius.circular(12),
         child: Padding(

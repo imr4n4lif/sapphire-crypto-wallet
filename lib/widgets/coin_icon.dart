@@ -27,7 +27,7 @@ class CoinIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // FIXED: Don't apply color filter for Tron to keep original colors
+    // FIXED: Don't apply color filter for Tron to keep original red color
     // Only apply color filter if explicitly provided AND not Tron
     final shouldApplyColor = color != null && coinType != CoinType.trx;
 
@@ -38,7 +38,7 @@ class CoinIcon extends StatelessWidget {
       colorFilter: shouldApplyColor
           ? ColorFilter.mode(color!, BlendMode.srcIn)
           : null,
-      // Allow original colors to show through
+      // Allow original colors to show through for Tron
       fit: BoxFit.contain,
     );
   }

@@ -28,7 +28,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshData();
+      if (mounted) {
+        _refreshData();
+      }
     });
   }
 
@@ -40,15 +42,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && mounted) {
       _refreshData();
     }
   }
 
   Future<void> _refreshData() async {
     if (!mounted) return;
-    await context.read<WalletProvider>().refreshBalances();
-    await context.read<WalletProvider>().refreshTransactions();
+
+    try {
+      await context.read<WalletProvider>().refreshBalances();
+      if (!mounted) return;
+      await context.read<WalletProvider>().refreshTransactions();
+    } catch (e) {
+      print('❌ Error refreshing data: $e');
+    }
   }
 
   void _showWalletMenu(BuildContext context) {
@@ -119,15 +127,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: _refreshData,
+            onPressed: () {
+              if (mounted) {
+                _refreshData();
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
+              if (mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              }
             },
           ),
         ],
@@ -148,7 +162,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           }
 
           return RefreshIndicator(
-            onRefresh: _refreshData,
+            onRefresh: () async {
+              if (mounted) {
+                await _refreshData();
+              }
+            },
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -283,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         label: Text(_getPortfolioTimelineLabel(option)),
                         selected: _selectedTimeline == option,
                         onSelected: (selected) {
-                          if (selected) {
+                          if (selected && mounted) {
                             setState(() => _selectedTimeline = option);
                           }
                         },
@@ -344,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       label: Text(_getPortfolioTimelineLabel(option)),
                       selected: _selectedTimeline == option,
                       onSelected: (selected) {
-                        if (selected) {
+                        if (selected && mounted) {
                           setState(() => _selectedTimeline = option);
                         }
                       },
@@ -528,12 +546,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CoinDetailScreen(coinType: coin.type),
-            ),
-          );
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CoinDetailScreen(coinType: coin.type),
+              ),
+            );
+          }
         },
         borderRadius: BorderRadius.circular(16),
         child: Padding(
@@ -608,7 +628,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-// FIXED Wallet Menu Bottom Sheet
+// FIXED Wallet Menu Bottom Sheet with proper context handling
 class _WalletMenuSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -776,7 +796,7 @@ class _WalletMenuSheet extends StatelessWidget {
     );
   }
 
-  // FIXED: Create wallet with proper async handling
+  // FIXED: Create wallet with proper context handling and mounted checks
   void _showCreateWalletDialog(BuildContext context) {
     final controller = TextEditingController(
         text: 'Wallet ${context.read<WalletProvider>().allWallets.length + 1}'
@@ -801,7 +821,7 @@ class _WalletMenuSheet extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               final name = controller.text.trim();
               if (name.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -811,7 +831,6 @@ class _WalletMenuSheet extends StatelessWidget {
               }
 
               Navigator.pop(dialogContext);
-
               _createWalletWithProgress(context, name);
             },
             child: const Text('Create'),
@@ -822,6 +841,11 @@ class _WalletMenuSheet extends StatelessWidget {
   }
 
   void _createWalletWithProgress(BuildContext context, String name) async {
+    // Store references before async operations
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
+    // Show progress
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -841,27 +865,28 @@ class _WalletMenuSheet extends StatelessWidget {
     );
 
     try {
-      final walletProvider = context.read<WalletProvider>();
+      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
       final mnemonic = await walletProvider.createNewWallet(name);
 
-      if (context.mounted) {
-        Navigator.pop(context); // Close progress
-        await Future.delayed(const Duration(milliseconds: 200));
+      // Close progress dialog
+      navigator.pop();
 
-        if (context.mounted) {
-          _showSeedPhraseDialog(context, mnemonic);
-        }
-      }
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Show seed phrase in a new screen instead of dialog
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => _SeedPhraseScreen(mnemonic: mnemonic),
+        ),
+      );
     } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); // Close progress
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      navigator.pop(); // Close progress
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -903,7 +928,7 @@ class _WalletMenuSheet extends StatelessWidget {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () async {
+            onPressed: () {
               final name = nameController.text.trim();
               final mnemonic = mnemonicController.text.trim();
 
@@ -915,7 +940,6 @@ class _WalletMenuSheet extends StatelessWidget {
               }
 
               Navigator.pop(dialogContext);
-
               _importWalletWithProgress(context, name, mnemonic);
             },
             child: const Text('Import'),
@@ -926,6 +950,9 @@ class _WalletMenuSheet extends StatelessWidget {
   }
 
   void _importWalletWithProgress(BuildContext context, String name, String mnemonic) async {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -945,32 +972,30 @@ class _WalletMenuSheet extends StatelessWidget {
     );
 
     try {
-      final walletProvider = context.read<WalletProvider>();
+      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
       await walletProvider.importExistingWallet(name, mnemonic);
 
-      if (context.mounted) {
-        Navigator.pop(context); // Close progress
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Wallet imported successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      navigator.pop(); // Close progress
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          content: Text('✅ Wallet imported successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
-      if (context.mounted) {
-        Navigator.pop(context); // Close progress
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      navigator.pop(); // Close progress
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   void _showSeedPhraseDialog(BuildContext context, String mnemonic) {
+    if (!context.mounted) return;
+
     final words = mnemonic.split(' ');
 
     showDialog(
@@ -1148,6 +1173,8 @@ class _WalletMenuSheet extends StatelessWidget {
             onPressed: () async {
               Navigator.pop(context);
 
+              if (!context.mounted) return;
+
               showDialog(
                 context: context,
                 barrierDismissible: false,
@@ -1182,6 +1209,117 @@ class _WalletMenuSheet extends StatelessWidget {
             child: const Text('Delete'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SeedPhraseScreen extends StatelessWidget {
+  final String mnemonic;
+
+  const _SeedPhraseScreen({required this.mnemonic});
+
+  @override
+  Widget build(BuildContext context) {
+    final words = mnemonic.split(' ');
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Save Your Seed Phrase'),
+        automaticallyImplyLeading: false,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.warning_amber, color: Colors.red),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Write down these 12 words and store them safely. Never share them!',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 3,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 8,
+              ),
+              itemCount: words.length,
+              itemBuilder: (context, index) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        '${index + 1}.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          words[index],
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: mnemonic));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Seed phrase copied')),
+                  );
+                },
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copy to Clipboard'),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('I\'ve Saved It'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

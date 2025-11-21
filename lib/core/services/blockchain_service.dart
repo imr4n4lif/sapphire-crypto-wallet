@@ -81,44 +81,54 @@ class BlockchainService {
     }
   }
 
-  Future<List<Transaction>> getBitcoinTransactions(String address) async {
-    try {
-      final cacheKey = 'btc_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
-
-      await _respectRateLimit(_lastBtcApiCall);
-      _lastBtcApiCall = DateTime.now();
-
-      final url = _isMainnet
-          ? 'https://mempool.space/api/address/$address/txs'
-          : 'https://mempool.space/testnet4/api/address/$address/txs';
-
-      final response = await _makeHttpRequest(url);
-
-      if (response != null && response.statusCode == 200) {
-        final txs = json.decode(response.body) as List;
-        final transactions = txs.take(20).map((tx) {
-          try {
-            return Transaction.fromBlockstreamBitcoin(tx, address);
-          } catch (e) {
-            print('⚠️ Error parsing BTC tx: $e');
-            return null;
-          }
-        }).whereType<Transaction>().toList();
-
-        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-        print('✅ Fetched ${transactions.length} BTC transactions');
-        return transactions;
-      }
-
-      return _cache[cacheKey]?.data as List<Transaction>? ?? [];
-    } catch (e) {
-      print('❌ BTC transactions error: $e');
-      return _cache['btc_tx_$address']?.data as List<Transaction>? ?? [];
+Future<List<Transaction>> getBitcoinTransactions(String address) async {
+  try {
+    final cacheKey = 'btc_tx_$address';
+    if (_isCacheValid(cacheKey, _txCacheTTL)) {
+      return _cache[cacheKey]!.data as List<Transaction>;
     }
+
+    await _respectRateLimit(_lastBtcApiCall);
+    _lastBtcApiCall = DateTime.now();
+
+    final url = _isMainnet
+        ? 'https://mempool.space/api/address/$address/txs'
+        : 'https://mempool.space/testnet4/api/address/$address/txs';
+
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    print('🔍 BITCOIN Transaction Fetch');
+    print('   My Address: $address');
+    print('   Network: ${_isMainnet ? "MAINNET" : "TESTNET4"}');
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    final response = await _makeHttpRequest(url);
+
+    if (response != null && response.statusCode == 200) {
+      final txs = json.decode(response.body) as List;
+      print('📦 Received ${txs.length} BTC transactions from API');
+      
+      final transactions = txs.take(20).map((tx) {
+        try {
+          return Transaction.fromBlockstreamBitcoin(tx, address);
+        } catch (e) {
+          print('   ⚠️ Error parsing BTC tx: $e');
+          return null;
+        }
+      }).whereType<Transaction>().toList();
+
+      print('✅ Successfully parsed ${transactions.length} BTC transactions');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+      _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+      return transactions;
+    }
+
+    return _cache[cacheKey]?.data as List<Transaction>? ?? [];
+  } catch (e) {
+    print('❌ BTC transactions error: $e\n');
+    return _cache['btc_tx_$address']?.data as List<Transaction>? ?? [];
   }
+}
 
   Future<String> sendBitcoin({
     required String fromAddress,
@@ -259,59 +269,76 @@ class BlockchainService {
     }
   }
 
-  Future<List<Transaction>> getEthereumTransactions(String address) async {
-    try {
-      final cacheKey = 'eth_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
+Future<List<Transaction>> getEthereumTransactions(String address) async {
+  try {
+    final cacheKey = 'eth_tx_$address';
+    if (_isCacheValid(cacheKey, _txCacheTTL)) {
+      return _cache[cacheKey]!.data as List<Transaction>;
+    }
 
-      await _respectRateLimit(_lastEthApiCall);
-      _lastEthApiCall = DateTime.now();
+    await _respectRateLimit(_lastEthApiCall);
+    _lastEthApiCall = DateTime.now();
 
-      final apiKey = AppConstants.etherscanApiKey;
-      if (apiKey.isEmpty) {
-        print('⚠️ Etherscan API key not configured');
-        return [];
-      }
-
-      final baseUrl = _isMainnet
-          ? AppConstants.ethMainnetEtherscanV2
-          : AppConstants.ethTestnetEtherscanV2;
-
-      final url = '$baseUrl?module=account&action=txlist'
-          '&address=$address&startblock=0&endblock=99999999'
-          '&page=1&offset=20&sort=desc&apikey=$apiKey';
-
-      final response = await _makeHttpRequest(url);
-
-      if (response != null && response.statusCode == 200) {
-        final data = json.decode(response.body);
-
-        if (data['status'] == '1' && data['result'] is List) {
-          final transactions = (data['result'] as List)
-              .map((tx) {
-            try {
-              return Transaction.fromEtherscanV2(tx, address);
-            } catch (e) {
-              return null;
-            }
-          })
-              .whereType<Transaction>()
-              .toList();
-
-          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-          print('✅ Fetched ${transactions.length} ETH transactions');
-          return transactions;
-        }
-      }
-
-      return [];
-    } catch (e) {
-      print('❌ ETH transactions error: $e');
+    final apiKey = AppConstants.etherscanApiKey;
+    if (apiKey.isEmpty) {
+      print('⚠️ Etherscan API key not configured\n');
       return [];
     }
+
+    final baseUrl = _isMainnet
+        ? AppConstants.ethMainnetEtherscanV2
+        : AppConstants.ethTestnetEtherscanV2;
+
+    final url = '$baseUrl?module=account&action=txlist'
+        '&address=$address&startblock=0&endblock=99999999'
+        '&page=1&offset=20&sort=desc&apikey=$apiKey';
+
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    print('🔍 ETHEREUM Transaction Fetch');
+    print('   My Address: $address');
+    print('   Network: ${_isMainnet ? "MAINNET" : "SEPOLIA"}');
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    final response = await _makeHttpRequest(url);
+
+    if (response != null && response.statusCode == 200) {
+      final data = json.decode(response.body);
+
+      print('📡 Etherscan Response: ${data['status']} - ${data['message']}');
+
+      if (data['status'] == '1' && data['result'] is List) {
+        final txList = data['result'] as List;
+        print('📦 Received ${txList.length} ETH transactions from API');
+        
+        final transactions = txList
+            .map((tx) {
+          try {
+            return Transaction.fromEtherscanV2(tx, address);
+          } catch (e) {
+            print('   ⚠️ Error parsing ETH tx: $e');
+            return null;
+          }
+        })
+            .whereType<Transaction>()
+            .toList();
+
+        print('✅ Successfully parsed ${transactions.length} ETH transactions');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+        return transactions;
+      } else {
+        print('⚠️ No transactions found or API error');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+      }
+    }
+
+    return [];
+  } catch (e) {
+    print('❌ ETH transactions error: $e\n');
+    return [];
   }
+}
 
   Future<String> sendEthereum({
     required String toAddress,
@@ -471,53 +498,95 @@ class BlockchainService {
     }
   }
 
-  Future<List<Transaction>> getTronTransactions(String address) async {
-    try {
-      final cacheKey = 'trx_tx_$address';
-      if (_isCacheValid(cacheKey, _txCacheTTL)) {
-        return _cache[cacheKey]!.data as List<Transaction>;
-      }
-
-      await _respectRateLimit(_lastTrxApiCall);
-      _lastTrxApiCall = DateTime.now();
-
-      final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
-      final url = '$baseUrl/v1/accounts/$address/transactions?limit=20';
-
-      final headers = <String, String>{'Content-Type': 'application/json'};
-      if (AppConstants.tronGridApiKey.isNotEmpty) {
-        headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
-      }
-
-      final response = await _httpClient.get(Uri.parse(url), headers: headers)
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['data'] != null) {
-          final transactions = (data['data'] as List)
-              .map((tx) {
-            try {
-              return Transaction.fromTronGrid(tx, address);
-            } catch (e) {
-              return null;
-            }
-          })
-              .whereType<Transaction>()
-              .toList();
-
-          _cache[cacheKey] = _CachedData(transactions, DateTime.now());
-          print('✅ Fetched ${transactions.length} TRX transactions');
-          return transactions;
-        }
-      }
-
-      return [];
-    } catch (e) {
-      print('❌ TRX transactions error: $e');
-      return [];
+Future<List<Transaction>> getTronTransactions(String address) async {
+  try {
+    final cacheKey = 'trx_tx_$address';
+    if (_isCacheValid(cacheKey, _txCacheTTL)) {
+      return _cache[cacheKey]!.data as List<Transaction>;
     }
+
+    await _respectRateLimit(_lastTrxApiCall);
+    _lastTrxApiCall = DateTime.now();
+
+    final baseUrl = _isMainnet ? AppConstants.trxMainnetApi : AppConstants.trxTestnetApi;
+    final url = '$baseUrl/v1/accounts/$address/transactions?limit=20';
+
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    print('🔍 TRON Transaction Fetch');
+    print('   My Address: $address');
+    print('   Network: ${_isMainnet ? "MAINNET" : "SHASTA"}');
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (AppConstants.tronGridApiKey.isNotEmpty) {
+      headers['TRON-PRO-API-KEY'] = AppConstants.tronGridApiKey;
+    }
+
+    final response = await _httpClient.get(Uri.parse(url), headers: headers)
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      
+      if (data['data'] != null) {
+        final txList = data['data'] as List;
+        print('📦 Received ${txList.length} total transactions from TronGrid');
+        
+        final transactions = <Transaction>[];
+        int skipped = 0;
+        
+        for (var tx in txList) {
+          try {
+            // Get contract type
+            final rawData = tx['raw_data'] ?? {};
+            final contracts = rawData['contract'] as List? ?? [];
+            
+            if (contracts.isEmpty) {
+              skipped++;
+              continue;
+            }
+            
+            final contract = contracts.first;
+            final contractType = contract['type']?.toString() ?? '';
+            
+            print('   Contract type: $contractType');
+            
+            // Only process TransferContract (native TRX transfers)
+            if (contractType == 'TransferContract') {
+              final parsedTx = Transaction.fromTronGrid(tx, address);
+              transactions.add(parsedTx);
+            } else {
+              print('   ⏭️  Skipped: $contractType');
+              skipped++;
+            }
+          } catch (e) {
+            print('   ⚠️ Error parsing TRX transaction: $e');
+            skipped++;
+            continue;
+          }
+        }
+
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        print('✅ TRX Summary:');
+        print('   Total from API: ${txList.length}');
+        print('   Successfully parsed: ${transactions.length}');
+        print('   Skipped/Failed: $skipped');
+        print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+
+        _cache[cacheKey] = _CachedData(transactions, DateTime.now());
+        return transactions;
+      }
+    } else {
+      print('⚠️ TronGrid API returned status: ${response.statusCode}');
+      print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    }
+
+    return [];
+  } catch (e) {
+    print('❌ TRX transactions error: $e\n');
+    return _cache['trx_tx_$address']?.data as List<Transaction>? ?? [];
   }
+}
 
   Future<String> sendTron({
     required String toAddress,
