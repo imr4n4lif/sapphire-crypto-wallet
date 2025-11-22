@@ -481,16 +481,33 @@ class WalletProvider with ChangeNotifier {
   }
 
   Future<void> refreshTransactions() async {
-    if (_wallet == null || _isRefreshing) return;
+    print('🔄 === REFRESH TRANSACTIONS CALLED ===');
+
+    if (_wallet == null || _isRefreshing) {
+      print('⚠️ Skipping: wallet=${_wallet != null}, isRefreshing=$_isRefreshing');
+      return;
+    }
+
+    print('📍 BTC Address: ${_wallet!.btcAddress}');
+    print('📍 ETH Address: ${_wallet!.ethAddress}');
+    print('📍 TRX Address: ${_wallet!.trxAddress}');
 
     try {
+      print('🔵 Fetching BTC transactions...');
       final btcTxs = await _blockchainService.getBitcoinTransactions(_wallet!.btcAddress);
+      print('✅ Got ${btcTxs.length} BTC transactions');
+
       await Future.delayed(const Duration(milliseconds: 200));
 
+      print('🔵 Fetching ETH transactions...');
       final ethTxs = await _blockchainService.getEthereumTransactions(_wallet!.ethAddress);
+      print('✅ Got ${ethTxs.length} ETH transactions');
+
       await Future.delayed(const Duration(milliseconds: 200));
 
+      print('🔵 Fetching TRX transactions...');
       final trxTxs = await _blockchainService.getTronTransactions(_wallet!.trxAddress);
+      print('✅ Got ${trxTxs.length} TRX transactions');
 
       _checkForNewTransactions(CoinType.btc, btcTxs);
       _checkForNewTransactions(CoinType.eth, ethTxs);
@@ -502,12 +519,14 @@ class WalletProvider with ChangeNotifier {
         CoinType.trx: trxTxs,
       };
 
+      print('✅ Transactions updated - BTC: ${btcTxs.length}, ETH: ${ethTxs.length}, TRX: ${trxTxs.length}');
       notifyListeners();
     } catch (e) {
-      print('❌ Error: $e');
+      print('❌ Error in refreshTransactions: $e');
     }
-  }
 
+    print('🔄 === REFRESH TRANSACTIONS COMPLETE ===');
+  }
   void _checkForNewTransactions(CoinType coinType, List<Transaction> newTxs) {
     if (newTxs.isEmpty) return;
 

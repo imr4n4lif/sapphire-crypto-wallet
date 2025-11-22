@@ -33,8 +33,12 @@ class AppConstants {
   static const String btcTestnetApi = 'https://blockstream.info/testnet/api';
 
   // Etherscan API
-  static const String ethMainnetEtherscanV2 = 'https://api.etherscan.io/api';
-  static const String ethTestnetEtherscanV2 = 'https://api-sepolia.etherscan.io/api';
+  // Etherscan API V2 - Unified endpoint for all chains
+  static const String etherscanV2Api = 'https://api.etherscan.io/v2/api';
+
+// Chain IDs for V2 API
+  static const String ethMainnetChainId = '1';
+  static const String ethSepoliaChainId = '11155111';
 
   // Tron - TronGrid API
   static const String trxMainnetApi = 'https://api.trongrid.io';

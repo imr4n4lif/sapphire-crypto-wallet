@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:bs58check/bs58check.dart' as bs58;
 import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
+import 'package:web3dart/crypto.dart' as web3_crypto;
 
 class WalletService {
   static final WalletService _instance = WalletService._internal();
@@ -60,11 +61,16 @@ class WalletService {
       }
     }
 
-    // Generate Tron wallet
+    // Generate Tron wallet - USE PRIVATE KEY directly for proper public key
     final trxPath = AppConstants.trxPath;
     final trxNode = root.derivePath(trxPath);
     final trxPrivateKey = HEX.encode(trxNode.privateKey!);
-    final trxAddress = _generateTronAddress(trxNode.publicKey, isMainnet);
+
+    // CRITICAL FIX: Use private key to get proper uncompressed public key
+    final trxCredentials = EthPrivateKey.fromHex(trxPrivateKey);
+    final trxPublicKey = trxCredentials.encodedPublicKey; // This gives us proper uncompressed 64-byte key
+    final trxAddress = _generateTronAddressFromPublicKey(trxPublicKey);
+
     print('✅ TRX Address (${ isMainnet ? "mainnet" : "shasta testnet"}): $trxAddress');
 
     // Validate Tron address
@@ -109,77 +115,36 @@ class WalletService {
     }
   }
 
-  String _generateTronAddress(Uint8List publicKey, bool isMainnet) {
+  String _generateTronAddressFromPublicKey(Uint8List publicKey64) {
     try {
-      print('🔧 Generating Tron address...');
+      print('🔧 Generating Tron address from public key...');
+      print('   Public key length: ${publicKey64.length}');
 
-      // Decompress public key if compressed (33 bytes)
-      Uint8List uncompressedKey;
-      if (publicKey.length == 33) {
-        uncompressedKey = _decompressSecp256k1PublicKey(publicKey);
-      } else if (publicKey.length == 65) {
-        uncompressedKey = publicKey;
-      } else {
-        throw Exception('Invalid public key length: ${publicKey.length}');
+      // publicKey64 should be 64 bytes (uncompressed, without 0x04 prefix)
+      if (publicKey64.length != 64) {
+        throw Exception('Expected 64-byte public key, got ${publicKey64.length}');
       }
 
-      // Remove the 0x04 prefix if present and get the 64-byte key
-      Uint8List keyBytes;
-      if (uncompressedKey.length == 65 && uncompressedKey[0] == 0x04) {
-        keyBytes = uncompressedKey.sublist(1);
-      } else if (uncompressedKey.length == 64) {
-        keyBytes = uncompressedKey;
-      } else {
-        throw Exception('Unexpected uncompressed key length: ${uncompressedKey.length}');
-      }
-
-      // Keccak256 hash of the 64-byte public key
-      final hash = _keccak256(keyBytes);
+      // Use web3dart's keccak256 (this is real Keccak256, not SHA3-256)
+      final hash = web3_crypto.keccak256(publicKey64);
+      print('   Keccak256 hash: ${HEX.encode(hash)}');
 
       // Take last 20 bytes
       final addressBytes = hash.sublist(hash.length - 20);
 
-      // Add Tron prefix (0x41 for both mainnet and testnet)
-      final prefix = 0x41;
-      final addressWithPrefix = Uint8List.fromList([prefix, ...addressBytes]);
+      // Add Tron prefix (0x41)
+      final addressWithPrefix = Uint8List.fromList([0x41, ...addressBytes]);
 
       // Base58Check encode
       final address = bs58.encode(addressWithPrefix);
 
       print('✅ Generated Tron Address: $address');
       return address;
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Error generating Tron address: $e');
-      // Return a placeholder that's valid format
-      return 'TGenerationError${DateTime.now().millisecondsSinceEpoch}';
+      print('Stack trace: $stackTrace');
+      rethrow;
     }
-  }
-
-  Uint8List _decompressSecp256k1PublicKey(Uint8List compressedKey) {
-    if (compressedKey.length != 33) {
-      throw Exception('Compressed key must be 33 bytes');
-    }
-
-    final prefix = compressedKey[0];
-    final xBytes = compressedKey.sublist(1);
-
-    // Create uncompressed key format
-    final uncompressed = Uint8List(65);
-    uncompressed[0] = 0x04; // Uncompressed marker
-    uncompressed.setRange(1, 33, xBytes);
-
-    // Generate y coordinate (simplified - proper EC math in production)
-    for (int i = 0; i < 32; i++) {
-      uncompressed[33 + i] = xBytes[i] ^ (prefix == 0x02 ? 0x00 : 0xFF);
-    }
-
-    return uncompressed;
-  }
-
-  Uint8List _keccak256(Uint8List input) {
-    // Using SHA3-256 as approximation (Keccak256 is similar)
-    final digest = sha256.convert(input);
-    return Uint8List.fromList(digest.bytes);
   }
 
   Uint8List _ripemd160(Uint8List input) {

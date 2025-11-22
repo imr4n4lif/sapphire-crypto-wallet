@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../core/services/blockchain_service.dart';
 import '../../core/constants/app_constants.dart';
 import '../splash_screen.dart';
+import '../wallet/address_book_screen.dart'; // Add this import
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -14,101 +15,109 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('Settings'),
-        ),
-        body: ListView(
-          children: [
+      appBar: AppBar(
+        title: const Text('Settings'),
+      ),
+      body: ListView(
+        children: [
           _buildSection(
-          context,
-          'Network',
-          [
-            _buildNetworkSwitch(context),
-          ],
-        ),
-        _buildSection(
-          context,
-          'Appearance',
-          [
-            _buildThemeSwitch(context),
-          ],
-        ),
-        _buildSection(
-          context,
-          'Security',
-          [
-            _buildBiometricSwitch(context),
-            _buildChangePinTile(context),
-          ],
-        ),
-        _buildSection(
-          context,
-          'Wallet',
-          [
-            _buildEditWalletNameTile(context),
-            _buildViewSeedPhraseTile(context),
-            _buildViewPrivateKeysTile(context),
-            _buildClearCacheTile(context),
-            _buildDeleteWalletTile(context),
-          ],
-        ),
-            _buildSection(
-              context,
-              'About',
-              [
-                ListTile(
-                  leading: const Icon(Icons.info_outline),
-                  title: const Text('Version'),
-                  trailing: Text(
-                    AppConstants.appVersion,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+            context,
+            'Network',
+            [
+              _buildNetworkSwitch(context),
+            ],
+          ),
+          _buildSection(
+            context,
+            'Appearance',
+            [
+              _buildThemeSwitch(context),
+            ],
+          ),
+          _buildSection(
+            context,
+            'Security',
+            [
+              _buildBiometricSwitch(context),
+              _buildChangePinTile(context),
+            ],
+          ),
+          // NEW SECTION: Address Book
+          _buildSection(
+            context,
+            'Contacts',
+            [
+              _buildAddressBookTile(context),
+            ],
+          ),
+          _buildSection(
+            context,
+            'Wallet',
+            [
+              _buildEditWalletNameTile(context),
+              _buildViewSeedPhraseTile(context),
+              _buildViewPrivateKeysTile(context),
+              _buildClearCacheTile(context),
+              _buildDeleteWalletTile(context),
+            ],
+          ),
+          _buildSection(
+            context,
+            'About',
+            [
+              ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('Version'),
+                trailing: Text(
+                  AppConstants.appVersion,
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
-                ListTile(
-                  leading: const Icon(Icons.speed),
-                  title: const Text('API Rate Limits'),
-                  subtitle: const Text('Auto-refresh every 5 minutes'),
-                  trailing: const Icon(Icons.info_outline),
-                  onTap: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: const Text('Rate Limiting Info'),
-                        content: const SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text('To avoid API rate limits:'),
-                              SizedBox(height: 8),
-                              Text('• Auto-refresh runs every 5 minutes'),
-                              Text('• Manual refresh has 2 second delays'),
-                              Text('• Cached data used when rate limited'),
-                              SizedBox(height: 12),
-                              Text('Mempool.space (Bitcoin):',
-                                  style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text('• Uses testnet4 for testing'),
-                              SizedBox(height: 8),
-                              Text('Etherscan (Ethereum):',
-                                  style: TextStyle(fontWeight: FontWeight.bold)),
-                              Text('• 100,000 requests/day (free tier)'),
-                            ],
-                          ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.speed),
+                title: const Text('API Rate Limits'),
+                subtitle: const Text('Auto-refresh every 5 minutes'),
+                trailing: const Icon(Icons.info_outline),
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Rate Limiting Info'),
+                      content: const SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('To avoid API rate limits:'),
+                            SizedBox(height: 8),
+                            Text('• Auto-refresh runs every 5 minutes'),
+                            Text('• Manual refresh has 2 second delays'),
+                            Text('• Cached data used when rate limited'),
+                            SizedBox(height: 12),
+                            Text('Mempool.space (Bitcoin):',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text('• Uses testnet4 for testing'),
+                            SizedBox(height: 8),
+                            Text('Etherscan (Ethereum):',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            Text('• 100,000 requests/day (free tier)'),
+                          ],
                         ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('OK'),
-                          ),
-                        ],
                       ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ],
-        ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -128,6 +137,22 @@ class SettingsScreen extends StatelessWidget {
         ...children,
         const Divider(height: 1),
       ],
+    );
+  }
+
+  // NEW: Address Book tile
+  Widget _buildAddressBookTile(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.contacts_outlined),
+      title: const Text('Address Book'),
+      subtitle: const Text('Manage saved addresses'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const AddressBookScreen()),
+        );
+      },
     );
   }
 
@@ -210,7 +235,6 @@ class SettingsScreen extends StatelessWidget {
           ),
           value: authProvider.biometricEnabled,
           onChanged: (value) async {
-            // Show loading indicator
             showDialog(
               context: context,
               barrierDismissible: false,
@@ -222,7 +246,7 @@ class SettingsScreen extends StatelessWidget {
             final success = await authProvider.setBiometricEnabled(value);
 
             if (context.mounted) {
-              Navigator.pop(context); // Close loading dialog
+              Navigator.pop(context);
 
               if (!success && value) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -437,7 +461,6 @@ class SettingsScreen extends StatelessWidget {
         );
 
         if (confirmed == true && context.mounted) {
-          // Show loading
           showDialog(
             context: context,
             barrierDismissible: false,
@@ -712,7 +735,6 @@ class ViewPrivateKeysScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               ...CoinInfo.allCoins.map((coin) {
-                // CHANGE THIS LINE - Use WalletHelper instead of WalletService
                 final privateKey = WalletHelper.getPrivateKey(walletProvider.wallet!, coin.type);
                 return _PrivateKeyCard(coin: coin, privateKey: privateKey);
               }),

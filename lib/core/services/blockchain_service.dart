@@ -272,15 +272,24 @@ class BlockchainService {
       _lastEthApiCall = DateTime.now();
 
       final apiKey = AppConstants.etherscanApiKey;
-      if (apiKey.isEmpty) return [];
 
-      final baseUrl = _isMainnet
-          ? AppConstants.ethMainnetEtherscanV2
-          : AppConstants.ethTestnetEtherscanV2;
+      if (apiKey.isEmpty) {
+        print('⚠️ Etherscan API key is empty');
+        return [];
+      }
 
-      final url = '$baseUrl?module=account&action=txlist'
+      // V2 uses unified endpoint for all chains
+      final baseUrl = AppConstants.etherscanV2Api;
+      final chainId = _isMainnet
+          ? AppConstants.ethMainnetChainId
+          : AppConstants.ethSepoliaChainId;
+
+      final url = '$baseUrl?chainid=$chainId'
+          '&module=account&action=txlist'
           '&address=$address&startblock=0&endblock=99999999'
           '&page=1&offset=20&sort=desc&apikey=$apiKey';
+
+      print('🌐 Fetching ETH txs from unified V2 endpoint (chainid=$chainId)');
 
       final response = await _makeHttpRequest(url);
 
@@ -289,17 +298,24 @@ class BlockchainService {
 
         if (data['status'] == '1' && data['result'] is List) {
           final txList = data['result'] as List;
+          print('✅ Got ${txList.length} ETH transactions');
+
           final transactions = txList.map((tx) {
             try {
               return Transaction.fromEtherscanV2(tx, address);
             } catch (e) {
+              print('⚠️ Failed to parse ETH tx: $e');
               return null;
             }
           }).whereType<Transaction>().toList();
 
           _cache[cacheKey] = _CachedData(transactions, DateTime.now());
           return transactions;
+        } else {
+          print('⚠️ ETH API response status: ${data['status']}, message: ${data['message']}');
         }
+      } else {
+        print('❌ ETH API failed: ${response?.statusCode}');
       }
 
       return [];
@@ -308,7 +324,6 @@ class BlockchainService {
       return [];
     }
   }
-
   Future<String> sendEthereum({
     required String toAddress,
     required String privateKey,
