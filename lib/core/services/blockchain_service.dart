@@ -9,7 +9,6 @@ import 'dart:typed_data';
 import '../../models/wallet.dart';
 import '../constants/app_constants.dart';
 import 'package:bitcoin_base/bitcoin_base.dart';
-import 'package:crypto/crypto.dart';
 import 'package:pointycastle/ecc/curves/secp256k1.dart';
 import 'package:pointycastle/ecc/api.dart';
 import 'package:pointycastle/api.dart';
@@ -216,20 +215,40 @@ class BlockchainService {
   }
 
   Future<String> _broadcastBitcoinTransaction(String txHex) async {
+    print('📡 Broadcasting Bitcoin transaction...');
+    print('   Network: ${_isMainnet ? "MAINNET" : "TESTNET4"}');
+    print('   TX Hex length: ${txHex.length}');
+    print('   TX Hex (first 100 chars): ${txHex.substring(0, txHex.length > 100 ? 100 : txHex.length)}');
+
     final url = _isMainnet
         ? 'https://mempool.space/api/tx'
         : 'https://mempool.space/testnet4/api/tx';
 
-    final response = await _httpClient.post(
-      Uri.parse(url),
-      headers: {'Content-Type': 'text/plain'},
-      body: txHex,
-    ).timeout(const Duration(seconds: 30));
+    print('🌐 Broadcast URL: $url');
 
-    if (response.statusCode == 200) {
-      return response.body.trim();
+    try {
+      final response = await _httpClient.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'text/plain'},
+        body: txHex,
+      ).timeout(const Duration(seconds: 30));
+
+      print('📥 Broadcast response status: ${response.statusCode}');
+      print('📥 Broadcast response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final txid = response.body.trim();
+        print('✅ Transaction broadcast successful!');
+        print('   TXID: $txid');
+        return txid;
+      } else {
+        print('❌ Broadcast failed with status ${response.statusCode}');
+        throw Exception('Broadcast failed: ${response.body}');
+      }
+    } catch (e) {
+      print('❌ Exception during broadcast: $e');
+      rethrow;
     }
-    throw Exception('Broadcast failed: ${response.body}');
   }
 
   bool _validateBitcoinAddress(String address) {
